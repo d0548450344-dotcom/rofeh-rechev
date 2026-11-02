@@ -114,13 +114,59 @@ const DTC_FORMAT = /^[PCBU][0-3][0-9A-F]{3}$/;
  */
 export function describeDtc(code: string): { descriptionHe: string; severity: Severity } {
   const upper = code.trim().toUpperCase();
-  const known = DTC_DB[upper];
+  const known = dtcOverlay.get(upper) ?? DTC_DB[upper];
   if (known) return { descriptionHe: known[0], severity: known[1] };
   return { descriptionHe: describeByStructure(upper), severity: "medium" };
 }
 
 export function isKnownDtc(code: string): boolean {
-  return DTC_DB[code.trim().toUpperCase()] !== undefined;
+  const upper = code.trim().toUpperCase();
+  return dtcOverlay.has(upper) || DTC_DB[upper] !== undefined;
+}
+
+/*
+ * Online updates. The app downloads shared/dtc/generic-dtc-he.json and, if it passes
+ * parseDtcSource, installs it on top of the built-in table, which always stays underneath.
+ * Mirrors android/core/.../DtcUpdates.kt.
+ */
+export const DTC_SOURCE_URL =
+  "https://raw.githubusercontent.com/d0548450344-dotcom/rofeh-rechev/main/shared/dtc/generic-dtc-he.json";
+
+let dtcOverlay: ReadonlyMap<string, readonly [string, Severity]> = new Map();
+
+const SEVERITIES: ReadonlySet<string> = new Set(["info", "low", "medium", "high", "critical"]);
+
+/** Validates a downloaded file. Null for anything malformed, oversized or truncated. */
+export function parseDtcSource(text: string): Map<string, readonly [string, Severity]> | null {
+  if (text.length > 2_000_000) return null;
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const codes = (root as { codes?: unknown } | null)?.codes;
+  if (!codes || typeof codes !== "object" || Array.isArray(codes)) return null;
+  const entries = Object.entries(codes as Record<string, unknown>);
+  if (entries.length > 20_000 || entries.length < Object.keys(DTC_DB).length) return null;
+  const out = new Map<string, readonly [string, Severity]>();
+  for (const [code, value] of entries) {
+    if (!DTC_FORMAT.test(code)) return null;
+    const entry = value as { he?: unknown; severity?: unknown } | null;
+    const he = typeof entry?.he === "string" ? entry.he.trim() : "";
+    const severity = entry?.severity;
+    if (he.length < 5 || he.length > 400 || typeof severity !== "string" || !SEVERITIES.has(severity)) return null;
+    out.set(code, [he, severity as Severity]);
+  }
+  return out;
+}
+
+export function installDtcOverlay(codes: ReadonlyMap<string, readonly [string, Severity]>): void {
+  dtcOverlay = new Map(codes);
+}
+
+export function knownDtcCount(): number {
+  return new Set([...Object.keys(DTC_DB), ...dtcOverlay.keys()]).size;
 }
 
 function describeByStructure(code: string): string {

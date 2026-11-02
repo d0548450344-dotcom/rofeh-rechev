@@ -98,10 +98,13 @@ private val DTC_FORMAT = Regex("^[PCBU][0-3][0-9A-F]{3}$")
  */
 fun describeDtc(code: String): DtcText {
     val upper = code.trim().uppercase()
-    return DTC_DB[upper] ?: DtcText(describeByStructure(upper), Severity.MEDIUM)
+    return overlayDtc(upper) ?: DTC_DB[upper] ?: DtcText(describeByStructure(upper), Severity.MEDIUM)
 }
 
-fun isKnownDtc(code: String): Boolean = DTC_DB.containsKey(code.trim().uppercase())
+fun isKnownDtc(code: String): Boolean {
+    val upper = code.trim().uppercase()
+    return overlayDtc(upper) != null || DTC_DB.containsKey(upper)
+}
 
 private fun describeByStructure(code: String): String {
     if (!DTC_FORMAT.matches(code)) {

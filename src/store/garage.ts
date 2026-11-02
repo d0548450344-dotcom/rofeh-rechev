@@ -15,6 +15,7 @@ import { openVehicleLink } from "@/app/link";
 import { canIgnition, canSession, disconnectPath, ignitionAllowsObd } from "@/domain/machines";
 import { appendSession, type ResourceSnapshot } from "@/persistence/record";
 import { browserRepository } from "@/persistence/browser";
+import { refreshDtcDatabase } from "@/app/dtc-update";
 import { shouldCommitScan } from "@/session/scan-gate";
 import type {
   ConnectResult,
@@ -161,6 +162,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
 
       hydrate: () => {
         if (get().hydrated) return;
+        void refreshDtcDatabase();
         const record = browserRepository().load();
         set({
           vehicles: record?.vehicles ?? [],

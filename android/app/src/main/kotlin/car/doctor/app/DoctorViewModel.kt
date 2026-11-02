@@ -10,11 +10,13 @@ import car.doctor.app.link.AdapterDirectory
 import car.doctor.app.link.AdapterPrefs
 import car.doctor.app.link.AdapterSource
 import car.doctor.app.link.BluetoothStatus
+import car.doctor.app.link.DtcUpdater
 import car.doctor.app.link.FoundAdapter
 import car.doctor.app.link.SwitchingAdapterFactory
 import car.doctor.app.link.WIFI_DEFAULT_HOST
 import car.doctor.app.link.WIFI_DEFAULT_PORT
 import car.doctor.core.catalog.fuelLabel
+import car.doctor.core.catalog.knownDtcCount
 import car.doctor.core.catalog.ignitionLabel
 import car.doctor.core.catalog.postureLabel
 import car.doctor.core.catalog.sessionLabel
@@ -96,8 +98,13 @@ class DoctorViewModel(
     private val links: SwitchingAdapterFactory,
     private val directory: AdapterDirectory,
     private val prefs: AdapterPrefs,
+    private val dtcUpdater: DtcUpdater? = null,
     private val storageNoticeHe: String? = null,
 ) : ViewModel() {
+    /** Separate from the bench thread: a slow download must never delay a scan. */
+    private val updates: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "dtc-updates").apply { isDaemon = true }
+    }
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "obd-bench").apply { isDaemon = true }
     }
@@ -132,6 +139,11 @@ class DoctorViewModel(
     var clearStep by mutableStateOf(ClearStep.NONE)
         private set
 
+    var dtcStatusHe by mutableStateOf("${knownDtcCount()} קודים מוכרים · מאגר מובנה")
+        private set
+    var dtcChecking by mutableStateOf(false)
+        private set
+
     var ui by mutableStateOf(compose())
         private set
 
@@ -143,6 +155,40 @@ class DoctorViewModel(
         }
         links.use(saved)
         ui = compose()
+        dtcUpdater?.let { updater ->
+            updates.execute {
+                updater.loadCached()
+                val result = updater.refreshIfDue()
+                main.post { dtcStatusHe = dtcStatus(updater, result) }
+            }
+        }
+    }
+
+    /** Settings: check GitHub for a newer fault-code database now. */
+    fun checkDtcUpdate() {
+        val updater = dtcUpdater ?: return
+        if (dtcChecking) return
+        dtcChecking = true
+        updates.execute {
+            val result = updater.refresh()
+            main.post {
+                dtcChecking = false
+                dtcStatusHe = dtcStatus(updater, result)
+            }
+        }
+    }
+
+    private fun dtcStatus(updater: DtcUpdater, result: DtcUpdater.Result?): String {
+        val count = knownDtcCount()
+        val checked = updater.lastCheckedMs.takeIf { it > 0 }?.let {
+            java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.ROOT).format(java.util.Date(it))
+        }
+        return when (result) {
+            is DtcUpdater.Result.Updated -> "$count קודים מוכרים · עודכן עכשיו"
+            is DtcUpdater.Result.UpToDate -> "$count קודים מוכרים · המאגר מעודכן"
+            is DtcUpdater.Result.Failed -> "$count קודים מוכרים. ${result.messageHe}"
+            null -> if (checked != null) "$count קודים מוכרים · נבדק לאחרונה $checked" else "$count קודים מוכרים"
+        }
     }
 
     fun showHome() = go(DoctorScreen.HOME)
@@ -439,6 +485,7 @@ class DoctorViewModel(
         directory.stopScan()
         worker.execute { runCatching { bench.disconnect() } }
         worker.shutdown()
+        updates.shutdownNow()
     }
 
     private companion object {

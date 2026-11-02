@@ -36,14 +36,30 @@ jobs:
       - name: Unit and architecture tests
         run: ./gradlew --no-daemon test
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+      # The signing key comes from repository secrets and is written only to the
+      # runner's temp folder. Same key every build = updates install over the old app.
+      - name: Build release APK (signed with the permanent key)
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ] && [ -n "$SIGNING_PASSWORD" ]; then
+            echo "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            export SIGNING_KEYSTORE_FILE="$RUNNER_TEMP/release.p12"
+            echo "Signing with the permanent release key."
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 / SIGNING_PASSWORD secrets are missing. This APK uses a temporary key and will not install over other builds."
+          fi
+          ./gradlew --no-daemon :app:assembleRelease
+          cp app/build/outputs/apk/release/*.apk "$RUNNER_TEMP/rofeh-rechev-${VERSION_CODE}.apk"
+          rm -f "$RUNNER_TEMP/release.p12"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: rofeh-rechev-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: rofeh-rechev-apk
+          path: ${{ runner.temp }}/rofeh-rechev-*.apk
           if-no-files-found: error
 
       - name: Upload test reports

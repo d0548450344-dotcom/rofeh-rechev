@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import car.doctor.app.link.AdapterDirectory
 import car.doctor.app.link.AdapterPrefs
+import car.doctor.app.link.DtcUpdater
 import car.doctor.app.link.SwitchingAdapterFactory
 import car.doctor.core.session.VehicleBench
 import car.doctor.data.JsonFileGarageRepository
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 links = links,
                 directory = AdapterDirectory(applicationContext),
                 prefs = AdapterPrefs(applicationContext),
+                dtcUpdater = DtcUpdater(applicationContext),
                 storageNoticeHe = storageNotice,
             )
         }

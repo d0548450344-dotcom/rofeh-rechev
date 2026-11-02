@@ -70,7 +70,7 @@ fun DoctorApp(vm: DoctorViewModel) {
                 DoctorScreen.BENCH -> BenchPage(ui, vm)
                 DoctorScreen.RESULT -> ResultPage(ui)
                 DoctorScreen.HISTORY -> HistoryPage(ui, vm)
-                DoctorScreen.SETTINGS -> SettingsPage(ui)
+                DoctorScreen.SETTINGS -> SettingsPage(ui, vm)
             }
         }
         NavBar(vm)
@@ -321,9 +321,21 @@ private fun HistoryPage(ui: DoctorUi, vm: DoctorViewModel) {
 }
 
 @Composable
-private fun SettingsPage(ui: DoctorUi) {
+private fun SettingsPage(ui: DoctorUi, vm: DoctorViewModel) {
     Text("הגדרות", fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
     ui.storageNoticeHe?.let { Banner(it) }
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("מאגר קודי תקלה")
+            Text(vm.dtcStatusHe, lineHeight = 20.sp)
+            Note("האפליקציה בודקת עדכון פעם בשבוע ושומרת עותק לשימוש בלי אינטרנט. עדכון שלא עובר בדיקה לא נטען.")
+            QuietAction(
+                if (vm.dtcChecking) "בודק…" else "בדוק עדכון עכשיו",
+                enabled = !vm.dtcChecking,
+                selected = false,
+            ) { vm.checkDtcUpdate() }
+        }
+    }
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("האפליקציה")

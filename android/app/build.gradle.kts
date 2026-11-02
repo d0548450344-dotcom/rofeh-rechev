@@ -4,6 +4,16 @@ plugins {
     kotlin("plugin.compose")
 }
 
+/*
+ * Release signing. The key never lives in the repository: CI decodes it from the
+ * SIGNING_KEYSTORE_B64 secret into a temp file and passes its path and password here.
+ * Every build signed with the same key installs over the previous one and keeps the
+ * user's garage. Without the variables, release falls back to debug signing.
+ */
+val signingFile: String? = System.getenv("SIGNING_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+val signingPassword: String? = System.getenv("SIGNING_PASSWORD")?.takeIf { it.isNotBlank() }
+val hasReleaseKey = signingFile != null && signingPassword != null && file(signingFile).isFile
+
 android {
     namespace = "car.doctor.app"
     compileSdk = 35
@@ -12,14 +22,37 @@ android {
         applicationId = "car.doctor.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.0"
+        // CI sets VERSION_CODE from the run number, so every build is an upgrade.
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 3
+        versionName = "0.3.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(signingFile!!)
+                storePassword = signingPassword
+                keyAlias = "rofeh-rechev"
+                keyPassword = signingPassword
+                storeType = "PKCS12"
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
+    }
+
+    lint {
+        // Lint runs in CI on its own; it must not block producing the APK.
+        checkReleaseBuilds = false
     }
 
     packaging {
