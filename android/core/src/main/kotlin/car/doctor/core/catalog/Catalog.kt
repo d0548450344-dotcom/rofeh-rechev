@@ -67,20 +67,77 @@ val OUT_OF_SCOPE: List<SystemGap> = listOf(
 
 data class DtcText(val descriptionHe: String, val severity: Severity)
 
-private val DTC_TEXT: Map<String, DtcText> = mapOf(
-    "P0300" to DtcText("החטאות בעירה ביותר מצילינדר אחד, או בלי שיוך לצילינדר.", Severity.HIGH),
-    "P0301" to DtcText("החטאת בעירה ששויכה לצילינדר 1.", Severity.HIGH),
-    "P0171" to DtcText("תערובת ענייה בבנק 1, לפי תיקון הדלק של היחידה.", Severity.MEDIUM),
-    "P0420" to DtcText("יעילות הממיר הקטליטי מתחת לסף בבנק 1.", Severity.MEDIUM),
-    "P0134" to DtcText("חיישן חמצן בנק 1 חיישן 1 לא הראה פעילות.", Severity.MEDIUM),
-    "P0217" to DtcText("טמפרטורת המנוע מעל סף ההגנה של היחידה.", Severity.HIGH),
-    "P0562" to DtcText("מתח המערכת נמוך לפי היחידה.", Severity.MEDIUM),
-    "C0035" to DtcText("מעגל חיישן מהירות גלגל קדמי שמאלי.", Severity.MEDIUM),
-    "B0001" to DtcText("מעגל כרית אוויר קדמית של הנהג.", Severity.CRITICAL),
+private val DTC_SYSTEM_HE = mapOf(
+    'P' to "מערכת ההנעה (מנוע ותיבת הילוכים)",
+    'C' to "השלדה (בלמים, היגוי, מתלים)",
+    'B' to "המרכב (כריות אוויר, נוחות, תאורה)",
+    'U' to "התקשורת בין יחידות הבקרה",
 )
 
-fun describeDtc(code: String): DtcText = DTC_TEXT[code]
-    ?: DtcText("אין תיאור מאומת לקוד הזה במאגר המקומי. לא משויכת לו משמעות משוערת.", Severity.MEDIUM)
+/** Third character of a P0 / P1 / P2 code: the subsystem (SAE J2012). */
+private val POWERTRAIN_AREA_HE = mapOf(
+    '0' to "מדידת דלק ואוויר ובקרת פליטות",
+    '1' to "מדידת דלק ואוויר",
+    '2' to "מדידת דלק ואוויר (מזרקים)",
+    '3' to "מערכת ההצתה והחטאות בעירה",
+    '4' to "בקרת פליטות",
+    '5' to "מהירות רכב, בקרת סרק וכניסות עזר",
+    '6' to "מחשב הרכב ויציאות עזר",
+    '7' to "תיבת ההילוכים",
+    '8' to "תיבת ההילוכים",
+    '9' to "תיבת ההילוכים",
+)
+
+private val DTC_FORMAT = Regex("^[PCBU][0-3][0-9A-F]{3}$")
+
+/**
+ * Description of a trouble code. Known generic codes come from the shared database
+ * (DtcDatabase.kt, generated). Anything else is described only by what the code's
+ * structure says, and says plainly that the meaning is unverified.
+ * Keep in step with describeDtc in src/domain/catalog.ts.
+ */
+fun describeDtc(code: String): DtcText {
+    val upper = code.trim().uppercase()
+    return DTC_DB[upper] ?: DtcText(describeByStructure(upper), Severity.MEDIUM)
+}
+
+fun isKnownDtc(code: String): Boolean = DTC_DB.containsKey(code.trim().uppercase())
+
+private fun describeByStructure(code: String): String {
+    if (!DTC_FORMAT.matches(code)) {
+        return "אין תיאור מאומת לקוד הזה במאגר המקומי. לא משויכת לו משמעות משוערת."
+    }
+    val system = DTC_SYSTEM_HE.getValue(code[0])
+    val lead = "הקוד לא נמצא במאגר המקומי. לפי מבנה הקוד בלבד:"
+    return when (dtcKind(code)) {
+        DtcKind.MANUFACTURER -> "$lead קוד יצרן של $system. המשמעות המדויקת תלויה ביצרן הרכב ולא אומתה."
+        DtcKind.RESERVED -> "$lead קוד של $system בטווח שמור. המשמעות לא אומתה."
+        DtcKind.GENERIC -> {
+            val area = if (code[0] == 'P') POWERTRAIN_AREA_HE[code[2]] else null
+            val where = area?.let { ", בתחום $it" }.orEmpty()
+            "$lead קוד כללי (תקני) של $system$where. המשמעות המדויקת לא אומתה."
+        }
+    }
+}
+
+private enum class DtcKind { GENERIC, MANUFACTURER, RESERVED }
+
+private fun dtcKind(code: String): DtcKind {
+    val d1 = code[1]
+    if (code[0] == 'P') {
+        return when {
+            d1 == '0' || d1 == '2' -> DtcKind.GENERIC
+            d1 == '1' -> DtcKind.MANUFACTURER
+            code[2] == '4' -> DtcKind.GENERIC // P34xx is SAE, the rest of P3 is manufacturer
+            else -> DtcKind.MANUFACTURER
+        }
+    }
+    return when (d1) {
+        '0' -> DtcKind.GENERIC
+        '3' -> DtcKind.RESERVED
+        else -> DtcKind.MANUFACTURER
+    }
+}
 
 fun ignitionLabel(state: IgnitionState): String = when (state) {
     IgnitionState.OFF -> "כבוי"

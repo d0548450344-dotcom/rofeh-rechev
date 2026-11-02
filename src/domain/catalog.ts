@@ -1,3 +1,4 @@
+import { DTC_DB } from "./dtc-db.generated.ts";
 import type {
   Confidence,
   DtcStatus,
@@ -83,52 +84,73 @@ export const OUT_OF_SCOPE: SystemGap[] = [
   },
 ];
 
-const DTC_TEXT: Record<string, { descriptionHe: string; severity: Severity }> = {
-  P0300: {
-    descriptionHe: "החטאות בעירה ביותר מצילינדר אחד, או בלי שיוך לצילינדר.",
-    severity: "high",
-  },
-  P0301: {
-    descriptionHe: "החטאת בעירה ששויכה לצילינדר 1.",
-    severity: "high",
-  },
-  P0171: {
-    descriptionHe: "תערובת ענייה בבנק 1, לפי תיקון הדלק של היחידה.",
-    severity: "medium",
-  },
-  P0420: {
-    descriptionHe: "יעילות הממיר הקטליטי מתחת לסף בבנק 1.",
-    severity: "medium",
-  },
-  P0134: {
-    descriptionHe: "חיישן חמצן בנק 1 חיישן 1 לא הראה פעילות.",
-    severity: "medium",
-  },
-  P0217: {
-    descriptionHe: "טמפרטורת המנוע מעל סף ההגנה של היחידה.",
-    severity: "high",
-  },
-  P0562: {
-    descriptionHe: "מתח המערכת נמוך לפי היחידה.",
-    severity: "medium",
-  },
-  C0035: {
-    descriptionHe: "מעגל חיישן מהירות גלגל קדמי שמאלי.",
-    severity: "medium",
-  },
-  B0001: {
-    descriptionHe: "מעגל כרית אוויר קדמית של הנהג.",
-    severity: "critical",
-  },
+const DTC_SYSTEM_HE: Record<string, string> = {
+  P: "מערכת ההנעה (מנוע ותיבת הילוכים)",
+  C: "השלדה (בלמים, היגוי, מתלים)",
+  B: "המרכב (כריות אוויר, נוחות, תאורה)",
+  U: "התקשורת בין יחידות הבקרה",
 };
 
+/** Third character of a P0 / P1 / P2 code: the subsystem (SAE J2012). */
+const POWERTRAIN_AREA_HE: Record<string, string> = {
+  "0": "מדידת דלק ואוויר ובקרת פליטות",
+  "1": "מדידת דלק ואוויר",
+  "2": "מדידת דלק ואוויר (מזרקים)",
+  "3": "מערכת ההצתה והחטאות בעירה",
+  "4": "בקרת פליטות",
+  "5": "מהירות רכב, בקרת סרק וכניסות עזר",
+  "6": "מחשב הרכב ויציאות עזר",
+  "7": "תיבת ההילוכים",
+  "8": "תיבת ההילוכים",
+  "9": "תיבת ההילוכים",
+};
+
+const DTC_FORMAT = /^[PCBU][0-3][0-9A-F]{3}$/;
+
+/**
+ * Description of a trouble code. Known generic codes come from the shared database.
+ * Anything else is described only by what the code's structure says (system, generic
+ * or manufacturer-specific, subsystem) and says plainly that the meaning is unverified.
+ */
 export function describeDtc(code: string): { descriptionHe: string; severity: Severity } {
-  return (
-    DTC_TEXT[code] ?? {
-      descriptionHe: "אין תיאור מאומת לקוד הזה במאגר המקומי. לא משויכת לו משמעות משוערת.",
-      severity: "medium",
-    }
-  );
+  const upper = code.trim().toUpperCase();
+  const known = DTC_DB[upper];
+  if (known) return { descriptionHe: known[0], severity: known[1] };
+  return { descriptionHe: describeByStructure(upper), severity: "medium" };
+}
+
+export function isKnownDtc(code: string): boolean {
+  return DTC_DB[code.trim().toUpperCase()] !== undefined;
+}
+
+function describeByStructure(code: string): string {
+  if (!DTC_FORMAT.test(code)) {
+    return "אין תיאור מאומת לקוד הזה במאגר המקומי. לא משויכת לו משמעות משוערת.";
+  }
+  const system = DTC_SYSTEM_HE[code[0]];
+  const kind = dtcKind(code);
+  const lead = "הקוד לא נמצא במאגר המקומי. לפי מבנה הקוד בלבד:";
+  if (kind === "manufacturer") {
+    return `${lead} קוד יצרן של ${system}. המשמעות המדויקת תלויה ביצרן הרכב ולא אומתה.`;
+  }
+  if (kind === "reserved") {
+    return `${lead} קוד של ${system} בטווח שמור. המשמעות לא אומתה.`;
+  }
+  const area = code[0] === "P" ? POWERTRAIN_AREA_HE[code[2]] : undefined;
+  const where = area ? `, בתחום ${area}` : "";
+  return `${lead} קוד כללי (תקני) של ${system}${where}. המשמעות המדויקת לא אומתה.`;
+}
+
+function dtcKind(code: string): "generic" | "manufacturer" | "reserved" {
+  const d1 = code[1];
+  if (code[0] === "P") {
+    if (d1 === "0" || d1 === "2") return "generic";
+    if (d1 === "1") return "manufacturer";
+    return code[2] === "4" ? "generic" : "manufacturer"; // P34xx is SAE, the rest of P3 is manufacturer
+  }
+  if (d1 === "0") return "generic";
+  if (d1 === "3") return "reserved";
+  return "manufacturer";
 }
 
 export const IGNITION_LABEL: Record<IgnitionState, string> = {
