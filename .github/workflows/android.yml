@@ -8,6 +8,9 @@ on:
     paths: ["android/**", "shared/**", "scripts/gen-dtc.mjs", ".github/workflows/android.yml"]
   workflow_dispatch:
 
+permissions:
+  contents: write # publish the latest APK as a release on main
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -54,6 +57,7 @@ jobs:
           ./gradlew --no-daemon :app:assembleRelease
           cp app/build/outputs/apk/release/*.apk "$RUNNER_TEMP/rofeh-rechev-${VERSION_CODE}.apk"
           rm -f "$RUNNER_TEMP/release.p12"
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then echo "SIGNED=1" >> "$GITHUB_ENV"; fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -68,3 +72,18 @@ jobs:
         with:
           name: test-reports
           path: android/**/build/reports/tests/
+
+      # One permanent link that always serves only the newest signed APK:
+      # https://github.com/<owner>/<repo>/releases/latest/download/rofeh-rechev.apk
+      - name: Publish latest APK
+        if: github.ref == 'refs/heads/main' && env.SIGNED == '1'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "$RUNNER_TEMP"/rofeh-rechev-*.apk "$RUNNER_TEMP/rofeh-rechev.apk"
+          gh release delete latest-apk --cleanup-tag --yes || true
+          gh release create latest-apk "$RUNNER_TEMP/rofeh-rechev.apk" \
+            --title "רופא רכב · build ${{ github.run_number }}" \
+            --notes "הגרסה העדכנית של האפליקציה, חתומה במפתח הקבוע. מותקנת מעל הגרסה הקודמת." \
+            --target "${{ github.sha }}" --latest
