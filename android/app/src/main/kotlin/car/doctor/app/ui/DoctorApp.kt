@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -339,7 +340,7 @@ private fun SettingsPage(ui: DoctorUi, vm: DoctorViewModel) {
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("האפליקציה")
-            StateLine("גרסה", "0.2.0")
+            StateLine("גרסה", appVersion())
             StateLine("מתאם", ui.sourceLabelHe)
             StateLine("כתיבה ליחידה", "מחיקת קודים בלבד")
             StateLine("צריבה / שיפור כוח", "חסומה")
@@ -612,4 +613,18 @@ private fun ClearDialogs(vm: DoctorViewModel) {
             dismissButton = { TextButton(onClick = { vm.cancelClear() }) { Text("ביטול") } },
         )
     }
+}
+
+/** The installed version as Android knows it, e.g. "0.3.0 (12)". Never hard-coded. */
+@Composable
+private fun appVersion(): String {
+    val context = LocalContext.current
+    return runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        "${info.versionName} ($code)"
+    }.getOrDefault("לא ידוע")
 }
