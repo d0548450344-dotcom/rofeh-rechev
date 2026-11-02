@@ -13,7 +13,8 @@ import { ignitionMoves } from "@/domain/machines";
 import type { EcuId, Posture } from "@/domain/types";
 import { Empty, Panel, Pill } from "@/components/ui";
 import { ScanReport } from "@/components/report";
-import { labFor, latestFor, useGarage } from "@/store/garage";
+import { labFor, latestFor, useGarage, type AdapterMode } from "@/store/garage";
+import { webBluetoothSupported, webSerialSupported } from "@/live/web-links";
 
 const POSTURES: Posture[] = ["idle", "straight", "turn", "brake"];
 const ECUS: EcuId[] = ["engine", "abs", "bcm", "srs"];
@@ -32,7 +33,10 @@ export function Bench() {
   const disconnect = useGarage((state) => state.disconnect);
   const quickScan = useGarage((state) => state.quickScan);
   const sampleResources = useGarage((state) => state.sampleResources);
+  const adapterMode = useGarage((state) => state.adapterMode);
+  const setAdapterMode = useGarage((state) => state.setAdapterMode);
   const [note, setNote] = useState<string | null>(null);
+  const realCar = adapterMode !== "simulated";
 
   const vehicle = vehicles.find((item) => item.id === selectedId) ?? null;
   const latest = sessions.find((session) => session.id === live.latestId) ?? latestFor(sessions, selectedId);
@@ -66,8 +70,14 @@ export function Bench() {
             <Pill tone={linked ? "ok" : live.session === "ERROR" ? "bad" : "neutral"}>
               {SESSION_LABEL[live.session]}
             </Pill>
-            <Pill>{IGNITION_LABEL[vehicle.sim.ignition]}</Pill>
-            <Pill tone="info">{POSTURE_LABEL[vehicle.sim.posture]}</Pill>
+            {realCar ? (
+              <Pill tone="info">{ADAPTER_MODE_LABEL[adapterMode]}</Pill>
+            ) : (
+              <>
+                <Pill>{IGNITION_LABEL[vehicle.sim.ignition]}</Pill>
+                <Pill tone="info">{POSTURE_LABEL[vehicle.sim.posture]}</Pill>
+              </>
+            )}
           </div>
           <p className="mt-3 text-sm leading-6 text-muted">
             {live.protocolHe ?? "פרוטוקול יופיע רק אחרי שהמתאם זיהה ערוץ. אין פרוטוקול — לא ממציאים אחד."}
@@ -76,107 +86,125 @@ export function Bench() {
           {note ? <p className="mt-2 text-sm leading-6 text-warn">{note}</p> : null}
         </Panel>
 
-        <Panel title="הצתה" hint="רק מעבר חוקי. אי אפשר לקפוץ מכיבוי ישר למנוע פועל.">
-          <ol className="mb-4 grid grid-cols-5 gap-1 text-center text-[11px] text-faint">
-            {(["OFF", "ACC", "ON", "STARTING", "RUNNING"] as const).map((step) => (
-              <li
-                key={step}
-                className={`rounded-xl px-1 py-2 ${
-                  vehicle.sim.ignition === step ? "bg-primary text-primary-ink" : "bg-bg-raised"
-                }`}
-              >
-                {IGNITION_LABEL[step]}
-              </li>
-            ))}
-          </ol>
-          <div className="flex flex-wrap gap-2">
-            {moves.map((move) => (
-              <button
-                key={move.to}
-                type="button"
-                disabled={live.busy}
-                onClick={() => setNote(setIgnition(move.to))}
-                className="min-h-11 rounded-xl border border-line bg-bg-raised px-3 text-sm disabled:opacity-40"
-              >
-                {move.label}
-              </button>
-            ))}
-          </div>
-        </Panel>
+        <AdapterPicker
+          mode={adapterMode}
+          disabled={live.busy || (live.session !== "DISCONNECTED" && live.session !== "ERROR")}
+          onChange={(mode) => {
+            setNote(null);
+            setAdapterMode(mode);
+          }}
+        />
 
-        <Panel title="תנאי נסיעה מדומים" hint="התנאי נשמר עם הסריקה. הוא לא נמדד מחיישן אמיתי.">
-          <div className="grid grid-cols-2 gap-2">
-            {POSTURES.map((posture) => (
-              <button
-                key={posture}
-                type="button"
-                disabled={live.busy}
-                onClick={() => setPosture(posture)}
-                className={`min-h-11 rounded-xl px-3 text-sm ${
-                  vehicle.sim.posture === posture
-                    ? "bg-primary text-primary-ink"
-                    : "border border-line bg-bg-raised"
-                }`}
-              >
-                {POSTURE_LABEL[posture]}
-              </button>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel
-          title="הזרקת תקלה"
-          hint="משנה את הרכב המדומה לפני הסריקה. הממצא חייב להגיע מהנתונים, לא משם ההזרקה."
-        >
-          <ul className="space-y-2">
-            {FAULT_CATALOG.map((fault) => {
-              const on = vehicle.sim.faults.includes(fault.id);
-              return (
-                <li key={fault.id}>
-                  <button
-                    type="button"
-                    disabled={live.busy}
-                    onClick={() => toggleFault(fault.id)}
-                    className={`w-full rounded-2xl border px-3 py-3 text-start disabled:opacity-40 ${
-                      on ? "border-warn bg-warn/10" : "border-line bg-bg-raised"
-                    }`}
-                  >
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{fault.titleHe}</span>
-                      <Pill tone={on ? "warn" : "neutral"}>{on ? "פעיל" : "כבוי"}</Pill>
-                    </span>
-                    <span className="mt-1 block text-sm leading-6 text-muted">{fault.detailHe}</span>
-                  </button>
+        {realCar ? (
+          <RealCarTips mode={adapterMode} />
+        ) : (
+          <>
+          <Panel title="הצתה" hint="רק מעבר חוקי. אי אפשר לקפוץ מכיבוי ישר למנוע פועל.">
+            <ol className="mb-4 grid grid-cols-5 gap-1 text-center text-[11px] text-faint">
+              {(["OFF", "ACC", "ON", "STARTING", "RUNNING"] as const).map((step) => (
+                <li
+                  key={step}
+                  className={`rounded-xl px-1 py-2 ${
+                    vehicle.sim.ignition === step ? "bg-primary text-primary-ink" : "bg-bg-raised"
+                  }`}
+                >
+                  {IGNITION_LABEL[step]}
                 </li>
-              );
-            })}
-          </ul>
-          {vehicle.sim.faults.includes("lost_ecu") ? (
-            <div className="mt-3">
-              <p className="mb-2 text-sm text-muted">איזו יחידה לא תענה</p>
-              <div className="grid grid-cols-2 gap-2">
-                {ECUS.map((ecu) => (
-                  <button
-                    key={ecu}
-                    type="button"
-                    onClick={() => setLostEcu(ecu)}
-                    className={`min-h-11 rounded-xl px-3 text-sm ${
-                      vehicle.sim.lostEcu === ecu
-                        ? "bg-primary text-primary-ink"
-                        : "border border-line bg-bg-raised"
-                    }`}
-                  >
-                    {ECU_META[ecu].nameHe}
-                  </button>
-                ))}
-              </div>
+              ))}
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              {moves.map((move) => (
+                <button
+                  key={move.to}
+                  type="button"
+                  disabled={live.busy}
+                  onClick={() => setNote(setIgnition(move.to))}
+                  className="min-h-11 rounded-xl border border-line bg-bg-raised px-3 text-sm disabled:opacity-40"
+                >
+                  {move.label}
+                </button>
+              ))}
             </div>
-          ) : null}
-        </Panel>
+          </Panel>
+
+          <Panel title="תנאי נסיעה מדומים" hint="התנאי נשמר עם הסריקה. הוא לא נמדד מחיישן אמיתי.">
+            <div className="grid grid-cols-2 gap-2">
+              {POSTURES.map((posture) => (
+                <button
+                  key={posture}
+                  type="button"
+                  disabled={live.busy}
+                  onClick={() => setPosture(posture)}
+                  className={`min-h-11 rounded-xl px-3 text-sm ${
+                    vehicle.sim.posture === posture
+                      ? "bg-primary text-primary-ink"
+                      : "border border-line bg-bg-raised"
+                  }`}
+                >
+                  {POSTURE_LABEL[posture]}
+                </button>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel
+            title="הזרקת תקלה"
+            hint="משנה את הרכב המדומה לפני הסריקה. הממצא חייב להגיע מהנתונים, לא משם ההזרקה."
+          >
+            <ul className="space-y-2">
+              {FAULT_CATALOG.map((fault) => {
+                const on = vehicle.sim.faults.includes(fault.id);
+                return (
+                  <li key={fault.id}>
+                    <button
+                      type="button"
+                      disabled={live.busy}
+                      onClick={() => toggleFault(fault.id)}
+                      className={`w-full rounded-2xl border px-3 py-3 text-start disabled:opacity-40 ${
+                        on ? "border-warn bg-warn/10" : "border-line bg-bg-raised"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{fault.titleHe}</span>
+                        <Pill tone={on ? "warn" : "neutral"}>{on ? "פעיל" : "כבוי"}</Pill>
+                      </span>
+                      <span className="mt-1 block text-sm leading-6 text-muted">{fault.detailHe}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {vehicle.sim.faults.includes("lost_ecu") ? (
+              <div className="mt-3">
+                <p className="mb-2 text-sm text-muted">איזו יחידה לא תענה</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {ECUS.map((ecu) => (
+                    <button
+                      key={ecu}
+                      type="button"
+                      onClick={() => setLostEcu(ecu)}
+                      className={`min-h-11 rounded-xl px-3 text-sm ${
+                        vehicle.sim.lostEcu === ecu
+                          ? "bg-primary text-primary-ink"
+                          : "border border-line bg-bg-raised"
+                      }`}
+                    >
+                      {ECU_META[ecu].nameHe}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </Panel>
+          </>
+        )}
       </div>
 
       <div className="space-y-4">
-        <Panel title="מתאם מדומה" hint="שכבת התעבורה היא קריאה בלבד. אין מחיקת קודים ואין כתיבה.">
+        <Panel
+          title={realCar ? ADAPTER_MODE_LABEL[adapterMode] : "מתאם מדומה"}
+          hint="קריאה בלבד. האפליקציה לא שולחת פקודת מחיקת קודים ולא כותבת לרכב."
+        >
           <div className="grid gap-2 sm:grid-cols-3">
             <Action
               label="התחברות"
@@ -218,7 +246,11 @@ export function Bench() {
         ) : (
           <Empty
             title="עדיין אין סריקה לרכב הזה"
-            body="מחזור טיפוסי: הצתה, מנוע פועל, התחברות, ואז סריקה מהירה. בלי חיבור לא נקרא כלום."
+            body={
+              realCar
+                ? "מחברים את המתאם לרכב, מעבירים הצתה ל-ON, לוחצים התחברות ובוחרים את המתאם בחלון של הדפדפן, ואז סריקה מהירה."
+                : "מחזור טיפוסי: הצתה, מנוע פועל, התחברות, ואז סריקה מהירה. בלי חיבור לא נקרא כלום."
+            }
           />
         )}
 
@@ -286,5 +318,87 @@ function Stat({ label, value, unit }: { label: string; value: string; unit?: str
         {unit ? <span className="ms-1 text-xs text-muted">{unit}</span> : null}
       </p>
     </div>
+  );
+}
+
+const ADAPTER_MODE_LABEL: Record<AdapterMode, string> = {
+  simulated: "רכב מדומה",
+  ble: "מתאם Bluetooth LE",
+  serial: "מתאם USB / יציאה טורית",
+};
+
+function AdapterPicker({
+  mode,
+  disabled,
+  onChange,
+}: {
+  mode: AdapterMode;
+  disabled: boolean;
+  onChange: (mode: AdapterMode) => void;
+}) {
+  const options: Array<{ mode: AdapterMode; label: string; available: boolean; why: string }> = [
+    { mode: "simulated", label: "רכב מדומה", available: true, why: "" },
+    {
+      mode: "ble",
+      label: "Bluetooth LE",
+      available: webBluetoothSupported(),
+      why: "דורש Chrome או Edge (לא באייפון).",
+    },
+    {
+      mode: "serial",
+      label: "USB / טורי",
+      available: webSerialSupported(),
+      why: "דורש Chrome או Edge במחשב.",
+    },
+  ];
+  return (
+    <Panel title="מקור הנתונים" hint="רכב מדומה לתרגול, או מתאם ELM327 אמיתי שמחובר לרכב.">
+      <div className="grid grid-cols-3 gap-2">
+        {options.map((option) => (
+          <button
+            key={option.mode}
+            type="button"
+            disabled={disabled || !option.available}
+            onClick={() => onChange(option.mode)}
+            className={`min-h-11 rounded-xl px-2 text-sm disabled:opacity-40 ${
+              mode === option.mode ? "bg-primary text-primary-ink" : "border border-line bg-bg-raised"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {options
+        .filter((option) => !option.available)
+        .map((option) => (
+          <p key={option.mode} className="mt-2 text-xs leading-5 text-faint">
+            {option.label}: {option.why}
+          </p>
+        ))}
+      <p className="mt-2 text-xs leading-5 text-faint">
+        מתאם Wi-Fi עובד רק באפליקציית ה-Android: דפדפן לא יכול לפתוח חיבור כזה.
+      </p>
+    </Panel>
+  );
+}
+
+function RealCarTips({ mode }: { mode: AdapterMode }) {
+  return (
+    <Panel title="לפני סריקה ברכב" hint="מה שהאפליקציה קוראת, ומה לא.">
+      <ol className="list-decimal space-y-1 ps-5 text-sm leading-6">
+        <li>מחברים את המתאם לשקע ה-OBD (בדרך כלל מתחת להגה).</li>
+        <li>מעבירים הצתה ל-ON או מתניעים. במצב כבוי הרכב לא עונה.</li>
+        <li>
+          {mode === "ble"
+            ? "לוחצים התחברות ובוחרים את המתאם ברשימה שהדפדפן פותח."
+            : "לוחצים התחברות ובוחרים את יציאת ה-USB או ה-COM של המתאם (מתאם Bluetooth רגיל מצמדים קודם ב-Windows)."}
+        </li>
+        <li>החיבור הראשון יכול לקחת עד 15 שניות, ואז סריקה מהירה.</li>
+      </ol>
+      <p className="mt-3 text-sm leading-6 text-muted">
+        נקראים קודי מנוע ופליטה, מוכנות ונתונים חיים לפי תקן OBD-II. ABS, כריות אוויר ומרכב דורשים פרוטוקול יצרן
+        ולא נסרקים.
+      </p>
+    </Panel>
   );
 }

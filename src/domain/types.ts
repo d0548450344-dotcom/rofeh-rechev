@@ -37,7 +37,7 @@ export type Confidence = "insufficient" | "low" | "medium" | "high";
 
 export type PidQuality = "valid" | "unavailable";
 
-export type AdapterKind = "simulated" | "ble" | "classic" | "wifi";
+export type AdapterKind = "simulated" | "ble" | "classic" | "wifi" | "serial";
 
 export interface VehicleSim {
   ignition: IgnitionState;

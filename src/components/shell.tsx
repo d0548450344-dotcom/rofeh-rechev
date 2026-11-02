@@ -28,7 +28,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">רופא רכב</h1>
           <p className="mt-1 max-w-xl text-sm leading-6 text-muted">
-            קריאה בלבד. אין רכב אמיתי ואין כתיבה ליחידת בקרה. מה שלא נקרא — לא נקבע.
+            קריאה בלבד: רכב מדומה, או מתאם ELM327 אמיתי. אין כתיבה ליחידת בקרה. מה שלא נקרא — לא נקבע.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-muted">

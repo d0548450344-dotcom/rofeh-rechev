@@ -19,6 +19,10 @@ const CORE = [
   "session/scan-gate.ts",
   "persistence/record.ts",
   "persistence/repository.ts",
+  "live/elm-parser.ts",
+  "live/elm327.ts",
+  "live/live-adapter.ts",
+  "live/web-links.ts",
 ];
 
 const UI = [
@@ -35,7 +39,7 @@ describe("the screen does not diagnose", () => {
       const text = readFileSync(join(root, file), "utf8");
       assert.doesNotMatch(
         text,
-        /evaluate\(|readFacts\(|createSimulatedAdapter|performQuickScan|localStorage/,
+        /evaluate\(|readFacts\(|readLiveFacts\(|createSimulatedAdapter|performQuickScan|sessionFromFacts|Elm327Session|localStorage/,
       );
     });
   }

@@ -1,12 +1,16 @@
 import { create } from "zustand";
 import { assessLab, attachLabContext, type LabCheck } from "@/engine/lab";
-import { performQuickScan } from "@/engine/quick-scan";
+import { performQuickScan, sessionFromFacts } from "@/engine/quick-scan";
+import { Elm327Session } from "@/live/elm327";
+import { connectMessage, observedIgnition, probeLive, readLiveFacts } from "@/live/live-adapter";
+import { openBleLink, openSerialLink } from "@/live/web-links";
 import { openVehicleLink } from "@/app/link";
 import { canIgnition, canSession, disconnectPath, ignitionAllowsObd } from "@/domain/machines";
 import { appendSession, type ResourceSnapshot } from "@/persistence/record";
 import { browserRepository } from "@/persistence/browser";
 import { shouldCommitScan } from "@/session/scan-gate";
 import type {
+  ConnectResult,
   EcuId,
   FaultId,
   Fuel,
@@ -26,7 +30,12 @@ export interface LiveState {
   scanEpoch: number;
 }
 
+/** Where the bench reads from. Real adapters need Chrome / Edge (Web Bluetooth or Web Serial). */
+export type AdapterMode = "simulated" | "ble" | "serial";
+
 export interface GarageState {
+  adapterMode: AdapterMode;
+  setAdapterMode: (mode: AdapterMode) => void;
   vehicles: Vehicle[];
   sessions: ScanSession[];
   selectedId: string | null;
@@ -45,6 +54,15 @@ export interface GarageState {
   disconnect: () => Promise<void>;
   quickScan: () => Promise<void>;
   sampleResources: () => void;
+}
+
+/** The open real-adapter link, if any. Not persisted: a reload starts disconnected. */
+let liveLink: Elm327Session | null = null;
+
+function dropLiveLink(): void {
+  const link = liveLink;
+  liveLink = null;
+  if (link) void link.close();
 }
 
 function uid(prefix: string): string {
@@ -110,6 +128,12 @@ function heapMb(): Pick<ResourceSnapshot, "heapMb" | "usedJsMb" | "limitJsMb"> {
 }
 
 export const useGarage = create<GarageState>()((set, get) => ({
+      adapterMode: "simulated",
+      setAdapterMode: (mode) => {
+        if (get().live.busy || mode === get().adapterMode) return;
+        dropLiveLink();
+        set((state) => ({ adapterMode: mode, live: idleLive(state.live.latestId, state.live.scanEpoch) }));
+      },
       vehicles: [],
       sessions: [],
       selectedId: null,
@@ -138,6 +162,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
           createdAt: new Date().toISOString(),
           sim: { ignition: "OFF", posture: "idle", faults: [], lostEcu: null },
         };
+        dropLiveLink();
         set((state) => ({
           vehicles: [vehicle, ...state.vehicles],
           selectedId: id,
@@ -147,6 +172,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
       },
 
       selectVehicle: (id) => {
+        if (id !== get().selectedId) dropLiveLink();
         set({ selectedId: id, live: idleLive() });
       },
 
@@ -259,6 +285,31 @@ export const useGarage = create<GarageState>()((set, get) => ({
             protocolHe: null,
           },
         });
+        const mode = get().adapterMode;
+        if (mode !== "simulated") {
+          // The browser's device picker must open before any other await.
+          let result: ConnectResult;
+          try {
+            const link = await (mode === "ble" ? openBleLink() : openSerialLink());
+            dropLiveLink();
+            liveLink = new Elm327Session(link);
+            result = await probeLive(liveLink);
+          } catch (error) {
+            result = { ok: false, protocolHe: null, errorHe: connectMessage(error) };
+          }
+          if (!result.ok) liveLink = null;
+          set({
+            live: {
+              session: result.ok ? "CONNECTED" : "ERROR",
+              protocolHe: result.ok ? result.protocolHe : null,
+              errorHe: result.ok ? null : result.errorHe,
+              busy: false,
+              latestId: get().live.latestId,
+              scanEpoch: get().live.scanEpoch,
+            },
+          });
+          return;
+        }
         await wait(420);
         const current = selected(get());
         if (!current) {
@@ -293,6 +344,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
 
       disconnect: async () => {
         const live = get().live;
+        dropLiveLink();
         if (live.session === "DISCONNECTED" || live.session === "DISCONNECTING") return;
         if (live.session === "ERROR") {
           set({ live: idleLive(live.latestId, live.scanEpoch) });
@@ -328,7 +380,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
           set((state) => ({
             live: {
               ...state.live,
-              errorHe: "סריקה דורשת חיבור. קודם מתחברים למתאם המדומה.",
+              errorHe: "סריקה דורשת חיבור. קודם מתחברים למתאם.",
             },
           }));
           return;
@@ -338,6 +390,47 @@ export const useGarage = create<GarageState>()((set, get) => ({
         set({
           live: { ...live, session: "SCANNING", busy: true, errorHe: null, scanEpoch: epoch },
         });
+        if (get().adapterMode !== "simulated") {
+          const link = liveLink;
+          const current = selected(get());
+          if (!link || !current) {
+            set((state) => ({
+              live: { ...state.live, session: "ERROR", busy: false, errorHe: "החיבור למתאם נסגר. מתחברים שוב." },
+            }));
+            return;
+          }
+          const finishedAt = new Date().toISOString();
+          const facts = await readLiveFacts(link, current, finishedAt);
+          const after = get().live;
+          if (!shouldCommitScan({ epochAtStart: epoch, epochNow: after.scanEpoch, session: after.session })) {
+            return;
+          }
+          const finished = Date.now();
+          const session = sessionFromFacts(facts, link.link.kind, {
+            vehicleId: current.id,
+            ignition: observedIgnition(facts) ?? current.sim.ignition,
+            posture: current.sim.posture,
+            id: uid("scan"),
+            startedAt: new Date(started).toISOString(),
+            finishedAt,
+            durationMs: finished - started,
+          });
+          const failed = facts.ecus.every((ecu) => ecu.access === "comm_error");
+          if (failed) dropLiveLink();
+          set((state) => ({
+            sessions: appendSession(state.sessions, session),
+            live: {
+              session: failed ? "ERROR" : "COMPLETE",
+              protocolHe: failed ? null : session.protocolHe,
+              errorHe: failed ? "החיבור למתאם נקטע באמצע הסריקה. מתחברים שוב." : null,
+              busy: false,
+              latestId: session.id,
+              scanEpoch: epoch,
+            },
+          }));
+          get().sampleResources();
+          return;
+        }
         await wait(680);
         const now = get().live;
         if (!shouldCommitScan({ epochAtStart: epoch, epochNow: now.scanEpoch, session: now.session })) {
