@@ -133,7 +133,7 @@ class VehicleBench(
                 ?: return rejected("אי אפשר לסגור את החיבור מהמצב הנוכחי. אין מסלול ניתוק חוקי.")
             applyPath(path)
             protocolHe = null
-            errorHe = "ההצתה ירדה מתחת ל-ON. החיבור המדומה נסגר במסלול ניתוק."
+            errorHe = "ההצתה ירדה מתחת ל-ON. החיבור נסגר במסלול ניתוק."
         } else {
             resetTrace()
             errorHe = null
@@ -197,7 +197,7 @@ class VehicleBench(
     fun quickScan(): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         if (!obd.canTransition(ObdSessionState.SCANNING)) {
-            return rejected("סריקה דורשת חיבור. קודם מתחברים למתאם המדומה.")
+            return rejected("סריקה דורשת חיבור. קודם מתחברים למתאם.")
         }
         resetTrace()
         val startedAt = clock.now()

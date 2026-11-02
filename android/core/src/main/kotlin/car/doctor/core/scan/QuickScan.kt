@@ -40,7 +40,8 @@ object QuickScan {
             dtcs = dtcs,
             pids = pids,
         )
-        val findings = DiagnosticRules.evaluate(collected, request.ignition)
+        val ignition = request.adapter.observedIgnition(readAt) ?: request.ignition
+        val findings = DiagnosticRules.evaluate(collected, ignition)
         return DiagnosticSession(
             id = request.id,
             vehicleId = request.vehicleId,
@@ -49,7 +50,7 @@ object QuickScan {
             startedAt = request.startedAt,
             finishedAt = request.finishedAt,
             durationMs = request.durationMs,
-            ignition = request.ignition,
+            ignition = ignition,
             posture = request.posture,
             protocolHe = collected.protocolHe,
             vinNoteHe = collected.vinNoteHe,

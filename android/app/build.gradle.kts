@@ -12,8 +12,8 @@ android {
         applicationId = "car.doctor.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -51,6 +51,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":simulation"))
+    implementation(project(":live"))
     implementation(project(":data"))
     // simulation and data keep these as implementation dependencies.
     // They are not transitive, and the APK still needs them at runtime.

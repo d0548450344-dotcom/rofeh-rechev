@@ -16,7 +16,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "rofeh-rechev"
 
-include(":core", ":transport", ":protocol", ":simulation", ":data", ":checks")
+include(":core", ":transport", ":protocol", ":simulation", ":live", ":data", ":checks")
 
 fun androidSdkDir(): java.io.File? {
     val env = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")

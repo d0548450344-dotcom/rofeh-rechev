@@ -8,7 +8,7 @@ import org.junit.Test
 class ArchitectureBoundaryTest {
     @Test
     fun domainDataAndSimulationDoNotImportAndroid() {
-        for (module in listOf("core", "simulation", "data", "transport", "protocol")) {
+        for (module in listOf("core", "simulation", "live", "data", "transport", "protocol")) {
             val sources = sources(module)
             assertTrue("$module has sources", sources.isNotEmpty())
             for (file in sources) {
@@ -47,13 +47,18 @@ class ArchitectureBoundaryTest {
         }
     }
 
+    /**
+     * Phase 2: real adapters. Bluetooth APIs and permissions are allowed only in the
+     * app's link package (and the manifest). Every other module stays Android-free.
+     */
     @Test
-    fun noBluetoothApiIsReferenced() {
+    fun bluetoothStaysInTheAppLinkLayer() {
         val files = mutableListOf<File>()
-        for (module in listOf("core", "transport", "protocol", "simulation", "data", "app", "checks")) {
+        for (module in listOf("core", "transport", "protocol", "simulation", "live", "data", "checks")) {
             val src = moduleRoot().resolve("$module/src/main")
             if (src.isDirectory) files += src.walkTopDown().filter { it.isFile && it.extension in setOf("kt", "xml") }
         }
+        files += sources("app").filterNot { it.isLinkLayer() }
         assertTrue(files.isNotEmpty())
         for (file in files) {
             val text = file.readText()
@@ -61,6 +66,20 @@ class ArchitectureBoundaryTest {
             assertFalse(file.path, text.contains("android.bluetooth"))
             assertFalse(file.path, text.contains("android.permission.BLUETOOTH"))
         }
+        assertTrue(sources("app").any { it.isLinkLayer() && it.readText().contains("android.bluetooth") })
+    }
+
+    @Test
+    fun liveAdapterIsReadOnly() {
+        val sources = sources("live") + sources("protocol").filter { it.name.startsWith("Elm") }
+        assertTrue(sources.isNotEmpty())
+        for (file in sources) {
+            val text = file.readText()
+            assertFalse(file.path, text.contains("\"04\\r\""))
+        }
+        val elm = sources("protocol").single { it.name == "Elm327Protocol.kt" }.readText()
+        assertTrue(elm.contains("READ_ONLY_SERVICES"))
+        assertFalse(elm.substringAfter("READ_ONLY_SERVICES: Set<Int> = setOf(").substringBefore(")").contains("0x04"))
     }
 
     @Test
@@ -69,6 +88,14 @@ class ArchitectureBoundaryTest {
         assertTrue(app.isNotEmpty())
         val allowedAdapter = setOf("MainActivity.kt")
         for (file in app) {
+            // The link package wires real transports to the bench. It never decodes or diagnoses.
+            if (file.isLinkLayer()) {
+                val text = file.readText()
+                assertFalse(file.name, text.contains("DiagnosticRules"))
+                assertFalse(file.name, text.contains("decodePid"))
+                assertFalse(file.name, text.contains("readDtcs"))
+                continue
+            }
             val text = file.readText()
             assertFalse(file.name, text.contains("DiagnosticRules"))
             assertFalse(file.name, text.contains("car.doctor.core.rules"))
@@ -131,6 +158,8 @@ private fun sources(module: String): List<File> {
     if (!dir.isDirectory) return emptyList()
     return dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 }
+
+private fun File.isLinkLayer(): Boolean = invariantSeparatorsPath.contains("/car/doctor/app/link/")
 
 private fun moduleRoot(): File {
     val start = File("").absoluteFile

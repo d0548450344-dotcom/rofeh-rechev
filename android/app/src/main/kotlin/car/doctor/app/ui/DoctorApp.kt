@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import car.doctor.app.DoctorScreen
 import car.doctor.app.DoctorUi
 import car.doctor.app.DoctorViewModel
+import car.doctor.app.PickerMode
 import car.doctor.core.catalog.GAP_BADGE_HE
 import car.doctor.core.catalog.fuelLabel
 import car.doctor.core.model.FaultId
@@ -132,7 +134,7 @@ private fun NavItem(
 private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
     Text("רופא רכב", fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
     Text(
-        "קריאה בלבד דרך מתאם מדומה. אין רכב אמיתי, אין בלוטות׳, ואין מחיקת קודים.",
+        "קריאה בלבד: קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. אין מחיקת קודים.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 15.sp,
         lineHeight = 22.sp,
@@ -145,7 +147,7 @@ private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
             SectionLabel("הרכבים במוסך")
             if (ui.vehicles.isEmpty()) {
                 Text(
-                    "אין עדיין פרופיל. הוסיפו רכב, ואז עברו לספסל כדי להדליק הצתה ולהריץ סריקה.",
+                    "אין עדיין פרופיל. הוסיפו רכב, ואז עברו לספסל כדי לבחור מתאם ולהריץ סריקה.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp,
                 )
@@ -194,11 +196,13 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
             Text(ui.metaHe, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(ui.vinNoteHe, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
-            StateLine("הצתה", ui.ignitionLabelHe)
+            if (!ui.live) StateLine("הצתה", ui.ignitionLabelHe)
             StateLine("חיבור OBD", ui.sessionLabelHe)
             ui.protocolHe?.let { StateLine("פרוטוקול", it) }
         }
     }
+    AdapterPanel(ui, vm)
+    ui.busyHe?.let { Busy(it) }
     ui.noticeHe?.let { Banner(it) }
     ui.errorHe?.let { Banner(it) }
     PairRow(
@@ -208,6 +212,11 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
     QuietAction("נתק", ui.canDisconnect, false) { vm.disconnect() }
     ui.latest?.let {
         QuietAction("פתח את התוצאה האחרונה", enabled = true, selected = false) { vm.showResult() }
+    }
+
+    if (ui.live) {
+        LiveTips()
+        return
     }
 
     Panel {
@@ -311,11 +320,11 @@ private fun SettingsPage(ui: DoctorUi) {
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("האפליקציה")
-            StateLine("גרסה", "0.1.0")
-            StateLine("מצב", "סימולציה")
+            StateLine("גרסה", "0.2.0")
+            StateLine("מתאם", ui.sourceLabelHe)
             StateLine("כתיבה ליחידה", "חסומה")
             Text(
-                "רופא רכב קורא בלבד. אין מחיקת קודים, אין צריבה, אין גישת אבטחה ואין ענן.",
+                "רופא רכב קורא בלבד. אין מחיקת קודים, אין צריבה, אין גישת אבטחה ואין ענן. גם במתאם אמיתי האפליקציה לא שולחת פקודת מחיקה.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 20.sp,
             )
@@ -448,4 +457,96 @@ private fun Banner(text: String) {
 @Composable
 private fun LabFault(id: FaultId, label: String, ui: DoctorUi, vm: DoctorViewModel) {
     QuietAction(label, enabled = true, selected = id in ui.activeFaults) { vm.fault(id) }
+}
+
+@Composable
+private fun AdapterPanel(ui: DoctorUi, vm: DoctorViewModel) {
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("מתאם")
+            Text(ui.sourceLabelHe, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            if (vm.picker == PickerMode.NONE) {
+                QuietAction("בחר מתאם", enabled = ui.canChangeSource, selected = false) {
+                    vm.openPicker(PickerMode.BLUETOOTH)
+                }
+                return@Column
+            }
+            PairRow(
+                left = {
+                    QuietAction("בלוטות׳", enabled = true, selected = vm.picker == PickerMode.BLUETOOTH) {
+                        vm.openPicker(PickerMode.BLUETOOTH)
+                    }
+                },
+                right = {
+                    QuietAction("Wi-Fi", enabled = true, selected = vm.picker == PickerMode.WIFI) {
+                        vm.openPicker(PickerMode.WIFI)
+                    }
+                },
+            )
+            vm.pickerNoticeHe?.let { Note(it) }
+            when (vm.picker) {
+                PickerMode.BLUETOOTH -> {
+                    Note("מתאם בלוטות׳ רגיל מצמדים קודם בהגדרות הטלפון. מתאם BLE מופיע בחיפוש.")
+                    vm.devices.forEach { device ->
+                        val kind = if (device.ble) "BLE" else "Bluetooth"
+                        val paired = if (device.paired) " · מצומד" else ""
+                        QuietAction("${device.name} ($kind$paired)", enabled = true, selected = false) {
+                            vm.useDevice(device)
+                        }
+                    }
+                    PairRow(
+                        left = { QuietAction("רענן מצומדים", enabled = true, selected = false) { vm.refreshPaired() } },
+                        right = {
+                            QuietAction(
+                                if (vm.scanningBle) "מחפש…" else "חפש BLE",
+                                enabled = !vm.scanningBle,
+                                selected = false,
+                            ) { vm.scanBle() }
+                        },
+                    )
+                }
+                PickerMode.WIFI -> {
+                    Note("מתחברים קודם ברשת ה-Wi-Fi של המתאם (בדרך כלל WiFi_OBDII או V-LINK), ואז חוזרים לכאן.")
+                    Field("כתובת המתאם", vm.wifiHost) { vm.wifiHost = it }
+                    Field("פורט", vm.wifiPort, number = true) { vm.wifiPort = it }
+                    PrimaryAction("השתמש במתאם Wi-Fi", enabled = true) { vm.useWifi() }
+                }
+                PickerMode.NONE -> Unit
+            }
+            QuietAction("רכב מדומה (תרגול)", enabled = true, selected = !ui.live) { vm.useSimulator() }
+            QuietAction("סגור", enabled = true, selected = false) { vm.closePicker() }
+        }
+    }
+}
+
+@Composable
+private fun LiveTips() {
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SectionLabel("לפני סריקה ברכב")
+            Text("1. מחברים את המתאם לשקע ה-OBD (בדרך כלל מתחת להגה).", lineHeight = 20.sp)
+            Text("2. מעבירים הצתה למצב ON או מתניעים. במצב כבוי הרכב לא עונה.", lineHeight = 20.sp)
+            Text("3. לוחצים ״התחבר״ ואז ״סריקה מהירה״. החיבור הראשון יכול לקחת עד 15 שניות.", lineHeight = 20.sp)
+            Note("נקראים קודי מנוע ופליטה לפי תקן OBD-II. ABS, כריות אוויר ומרכב דורשים פרוטוקול יצרן ולא נסרקים.")
+        }
+    }
+}
+
+@Composable
+private fun Busy(text: String) {
+    Panel {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(modifier = Modifier.height(22.dp).widthIn(max = 22.dp), strokeWidth = 2.dp)
+            Text(text, lineHeight = 20.sp)
+        }
+    }
+}
+
+@Composable
+private fun Note(text: String) {
+    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, lineHeight = 18.sp)
 }
