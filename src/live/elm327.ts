@@ -35,8 +35,25 @@ export class ElmLinkError extends Error {
   }
 }
 
-/** Services this driver will put on the bus. 0x04 (clear codes) is deliberately absent. */
+/** Services request() will put on the bus. 0x04 (clear) only goes through clearCodes(). */
 export const READ_ONLY_SERVICES: ReadonlySet<number> = new Set([0x01, 0x02, 0x03, 0x07, 0x09, 0x0a]);
+
+/**
+ * Services that write to a controller: flashing / tuning, coding, security access,
+ * routines, resets, session changes and UDS code clearing. Never sent by this app.
+ */
+export const WRITE_AND_FLASH_SERVICES: ReadonlySet<number> = new Set([
+  0x10, 0x11, 0x14, 0x27, 0x28, 0x2e, 0x2f, 0x31, 0x34, 0x35, 0x36, 0x37, 0x3b, 0x3d, 0x85,
+]);
+
+/** Proof that the user acknowledged both clear-codes warnings. */
+export interface ClearCodesConsent {
+  confirmedAt: string;
+  understoodCodesReturn: true;
+  understoodReadinessReset: true;
+}
+
+export type ClearReply = { ok: true } | { ok: false; reason: "engine_running" | "refused" | "unconfirmed" | "lost" };
 
 export const INIT_COMMANDS = ["ATZ", "ATE0", "ATL0", "ATS1", "ATH0", "ATAT1", "ATSP0"] as const;
 const REQUIRED = new Set(["ATE0", "ATH0", "ATSP0"]);
@@ -149,6 +166,32 @@ export class Elm327Session {
       const match = mine.find((m) => wanted === undefined || (m.length > 1 && m[1] === wanted));
       if (!match) return { ok: false, reason: "unexpected", detail: command };
       return { ok: true, service: positive, payload: match.slice(1) };
+    };
+    const next = this.queue.then(run, run);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Mode 04: clears stored/pending codes, freeze frame and readiness. The only write this
+   * driver can send. Most ECUs refuse it while the engine runs (negative answer 0x22).
+   */
+  clearCodes(consent: ClearCodesConsent): Promise<ClearReply> {
+    const run = async (): Promise<ClearReply> => {
+      if (!consent.understoodCodesReturn || !consent.understoodReadinessReset) return { ok: false, reason: "refused" };
+      if (this.lost) return { ok: false, reason: "lost" };
+      let text: string;
+      try {
+        text = await this.exchange("04", 10_000);
+      } catch (error) {
+        return { ok: false, reason: error instanceof ElmLinkError && error.reason === "lost" ? "lost" : "unconfirmed" };
+      }
+      const parsed = parseElm(text, "04");
+      if (parsed.kind !== "messages") return { ok: false, reason: "unconfirmed" };
+      if (parsed.messages.some((m) => m[0] === 0x44)) return { ok: true };
+      const negative = parsed.messages.find((m) => m.length >= 3 && m[0] === 0x7f && m[1] === 0x04);
+      if (negative) return { ok: false, reason: negative[2] === 0x22 ? "engine_running" : "refused" };
+      return { ok: false, reason: "unconfirmed" };
     };
     const next = this.queue.then(run, run);
     this.queue = next.catch(() => undefined);

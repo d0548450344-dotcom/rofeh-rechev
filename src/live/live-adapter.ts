@@ -222,3 +222,39 @@ function commFailure(vehicle: Vehicle, readAt: string, reason: "lost" | "timeout
     engineTimeout: reason === "timeout",
   };
 }
+
+export const ENGINE_RUNNING_HE =
+  "המנוע פועל. מכבים את המנוע, משאירים את ההצתה במצב ON, ואז מוחקים. רוב היחידות מסרבות למחוק כשהמנוע מסתובב.";
+
+export type ClearResult = { ok: true } | { ok: false; refused: boolean; messageHe: string };
+
+/** Checks on the car that the engine is off and the vehicle still, then sends mode 04. */
+export async function clearLive(session: Elm327Session, confirmedAt: string): Promise<ClearResult> {
+  const read = async (pid: number, decode: (d: number[]) => number): Promise<number | null> => {
+    const reply = await session.request(0x01, [pid]);
+    if (!reply.ok || reply.payload.length < 2) return null;
+    return decode(reply.payload.slice(1));
+  };
+  const speed = await read(0x0d, ([a]) => a);
+  if (speed === null) return { ok: false, refused: true, messageHe: "לא הצלחנו לוודא מהרכב שהוא עומד. לא בוצעה מחיקה." };
+  if (speed > 0) return { ok: false, refused: true, messageHe: "הרכב בתנועה. עוצרים לפני מחיקת קודים." };
+  const rpm = await read(0x0c, ([a, b]) => (a * 256 + (b ?? 0)) / 4);
+  if (rpm !== null && rpm > 0) return { ok: false, refused: true, messageHe: ENGINE_RUNNING_HE };
+
+  const reply = await session.clearCodes({ confirmedAt, understoodCodesReturn: true, understoodReadinessReset: true });
+  if (reply.ok) return { ok: true };
+  switch (reply.reason) {
+    case "engine_running":
+      return { ok: false, refused: true, messageHe: ENGINE_RUNNING_HE };
+    case "refused":
+      return { ok: false, refused: true, messageHe: "יחידת המנוע סירבה למחוק את הקודים. לא נמחק דבר." };
+    case "lost":
+      return { ok: false, refused: false, messageHe: "החיבור למתאם נותק בזמן המחיקה. מתחברים שוב וסורקים." };
+    default:
+      return {
+        ok: false,
+        refused: false,
+        messageHe: "המחיקה לא אושרה על ידי הרכב. ייתכן שחלק מהיחידות נמחקו וחלק לא. סריקה חוזרת תראה מה המצב.",
+      };
+  }
+}

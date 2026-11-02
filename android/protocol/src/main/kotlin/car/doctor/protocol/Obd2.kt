@@ -66,6 +66,43 @@ data class ReadinessReport(
     val raw: List<Int>,
 )
 
+/**
+ * Proof that the user went through the clear-codes warnings. It carries no authority
+ * beyond mode 04: flashing, coding and security access stay impossible.
+ */
+data class ClearCodesConsent(
+    val confirmedAt: String,
+    val understoodCodesReturn: Boolean,
+    val understoodReadinessReset: Boolean,
+) {
+    init {
+        require(understoodCodesReturn && understoodReadinessReset) { "both warnings must be acknowledged" }
+    }
+}
+
+/**
+ * Services that write to a controller: reprogramming (flashing / tuning), coding,
+ * security access, routines, resets, session changes and UDS code clearing.
+ * No protocol in this app may send them. Listed so tests can prove it.
+ */
+val WRITE_AND_FLASH_SERVICES: Set<Int> = setOf(
+    0x10, // diagnostic session control (programming session)
+    0x11, // ECU reset
+    0x14, // UDS clear diagnostic information
+    0x27, // security access (seed / key)
+    0x28, // communication control
+    0x2E, // write data by identifier (coding)
+    0x2F, // input / output control
+    0x31, // routine control (erase memory, checks)
+    0x34, // request download (flash)
+    0x35, // request upload
+    0x36, // transfer data (flash)
+    0x37, // request transfer exit
+    0x3B, // KWP write data by local identifier
+    0x3D, // write memory by address
+    0x85, // control DTC setting
+)
+
 object Obd2Profile {
     val foundation: ProtocolCapabilities = ProtocolCapabilities(
         supportsObd2 = true,
@@ -84,6 +121,11 @@ object Obd2Profile {
         ),
         supportsDtc = true,
         supportsReadiness = true,
+    )
+
+    /** Foundation plus mode 04. Still no write, flash or security services. */
+    val withClear: ProtocolCapabilities = foundation.copy(
+        supportedModes = foundation.supportedModes + ObdMode.CLEAR_CODES,
     )
 }
 
@@ -118,10 +160,30 @@ object Obd2 {
         return requestPid(ObdPid.MONITOR_STATUS, capabilities)
     }
 
-    /** Clear codes are out of scope. A profile that lists the mode is still refused. */
-    fun clearCodes(capabilities: ProtocolCapabilities): ProtocolOutcome<ProtocolRequest> {
-        if (ObdMode.CLEAR_CODES in capabilities.supportedModes) return unsupported("clear-codes")
-        return unsupported("clear-codes")
+    /**
+     * Mode 04: clear stored and pending codes, freeze frame and readiness.
+     * Only a profile that explicitly lists [ObdMode.CLEAR_CODES] may build it, and the
+     * caller must hold a [ClearCodesConsent] (the user confirmed twice).
+     */
+    fun clearCodes(
+        capabilities: ProtocolCapabilities,
+        consent: ClearCodesConsent?,
+    ): ProtocolOutcome<ProtocolRequest> {
+        if (consent == null) return unsupported("clear-codes-without-consent")
+        if (ObdMode.CLEAR_CODES !in capabilities.supportedModes) return unsupported("clear-codes")
+        return ProtocolOutcome.Ok(ProtocolRequest(ObdMode.CLEAR_CODES.service))
+    }
+
+    /** Positive answer is service 0x44. A negative answer carries the ECU's reason (NRC). */
+    fun decodeClear(response: ProtocolResponse): ProtocolOutcome<Unit> {
+        if (response.service == NEGATIVE) {
+            val nrc = response.payload.getOrNull(1) ?: 0
+            return protocol(ProtocolError.UnexpectedResponse("negative-clear-%02X".format(nrc)))
+        }
+        if (response.service != ObdMode.CLEAR_CODES.service + POSITIVE_OFFSET) {
+            return protocol(ProtocolError.UnexpectedResponse("service"))
+        }
+        return ProtocolOutcome.Ok(Unit)
     }
 
     fun decodePid(response: ProtocolResponse): ProtocolOutcome<PidReading> {

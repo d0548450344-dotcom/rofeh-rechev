@@ -2,7 +2,14 @@ import { create } from "zustand";
 import { assessLab, attachLabContext, type LabCheck } from "@/engine/lab";
 import { performQuickScan, sessionFromFacts } from "@/engine/quick-scan";
 import { Elm327Session } from "@/live/elm327";
-import { connectMessage, observedIgnition, probeLive, readLiveFacts } from "@/live/live-adapter";
+import {
+  ENGINE_RUNNING_HE,
+  clearLive,
+  connectMessage,
+  observedIgnition,
+  probeLive,
+  readLiveFacts,
+} from "@/live/live-adapter";
 import { openBleLink, openSerialLink } from "@/live/web-links";
 import { openVehicleLink } from "@/app/link";
 import { canIgnition, canSession, disconnectPath, ignitionAllowsObd } from "@/domain/machines";
@@ -28,6 +35,8 @@ export interface LiveState {
   busy: boolean;
   latestId: string | null;
   scanEpoch: number;
+  /** The scan made on the current link. Clearing codes is allowed only right after it. */
+  scanThisLink?: string | null;
 }
 
 /** Where the bench reads from. Real adapters need Chrome / Edge (Web Bluetooth or Web Serial). */
@@ -53,6 +62,8 @@ export interface GarageState {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   quickScan: () => Promise<void>;
+  /** Clears codes after two acknowledgements. Returns a Hebrew reason when refused, null on success. */
+  clearCodes: (understoodCodesReturn: boolean, understoodReadinessReset: boolean) => Promise<string | null>;
   sampleResources: () => void;
 }
 
@@ -102,6 +113,13 @@ function idleLive(latestId: string | null = null, scanEpoch = 0): LiveState {
 export function latestFor(sessions: ScanSession[], vehicleId: string | null): ScanSession | null {
   if (!vehicleId) return null;
   return sessions.find((session) => session.vehicleId === vehicleId) ?? null;
+}
+
+/** True right after a scan on this link that found codes. */
+export function canClearCodes(state: Pick<GarageState, "live" | "sessions">): boolean {
+  if (state.live.busy || state.live.session !== "COMPLETE" || !state.live.scanThisLink) return false;
+  const scan = state.sessions.find((s) => s.id === state.live.scanThisLink);
+  return Boolean(scan && scan.dtcs.length > 0);
 }
 
 export function labFor(session: ScanSession | null): LabCheck[] {
@@ -426,6 +444,7 @@ export const useGarage = create<GarageState>()((set, get) => ({
               busy: false,
               latestId: session.id,
               scanEpoch: epoch,
+              scanThisLink: failed ? null : session.id,
             },
           }));
           get().sampleResources();
@@ -461,9 +480,83 @@ export const useGarage = create<GarageState>()((set, get) => ({
             busy: false,
             latestId: session.id,
             scanEpoch: epoch,
+            scanThisLink: session.id,
           },
         }));
         get().sampleResources();
+      },
+
+      clearCodes: async (understoodCodesReturn, understoodReadinessReset) => {
+        if (!understoodCodesReturn || !understoodReadinessReset) return "צריך לאשר את שתי האזהרות לפני מחיקה.";
+        const vehicle = selected(get());
+        const live = get().live;
+        if (!vehicle || live.busy) return "יש פעולה באמצע. ממתינים שתסתיים.";
+        if (live.session !== "COMPLETE") return "מחיקה אפשרית רק מיד אחרי סריקה, כשהמתאם עדיין מחובר.";
+        const prior = get().sessions.find((s) => s.id === live.scanThisLink && s.vehicleId === vehicle.id);
+        if (!prior) return "סורקים קודם, כדי שהקודים יישמרו לפני המחיקה.";
+        if (prior.dtcs.length === 0) return "אין קודים למחוק בסריקה האחרונה.";
+        const cleared = [...new Set(prior.dtcs.map((dtc) => dtc.code))];
+        const mode = get().adapterMode;
+
+        set({ live: { ...live, busy: true, errorHe: null } });
+        const started = Date.now();
+        const meta = (ignition: IgnitionState) => ({
+          vehicleId: vehicle.id,
+          ignition,
+          posture: vehicle.sim.posture,
+          id: uid("scan"),
+          startedAt: new Date(started).toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - started,
+        });
+        let session: ScanSession;
+        if (mode === "simulated") {
+          // Like a real ECU: refuse while the engine turns or the car moves. The injected
+          // fault stays, so its code comes back on the verification scan.
+          const refusal =
+            vehicle.sim.ignition === "RUNNING" || vehicle.sim.ignition === "STARTING"
+              ? ENGINE_RUNNING_HE
+              : vehicle.sim.posture !== "idle"
+                ? "הרכב בתנועה. עוצרים לפני מחיקת קודים."
+                : null;
+          if (refusal) {
+            set((state) => ({ live: { ...state.live, busy: false } }));
+            return refusal;
+          }
+          session = attachLabContext(
+            performQuickScan({ transport: openVehicleLink(vehicle), ...meta(vehicle.sim.ignition) }),
+            vehicle.sim,
+          );
+        } else {
+          const link = liveLink;
+          if (!link) {
+            set((state) => ({ live: { ...state.live, busy: false, session: "ERROR", errorHe: "החיבור למתאם נסגר. מתחברים שוב." } }));
+            return "החיבור למתאם נסגר. מתחברים שוב.";
+          }
+          const result = await clearLive(link, new Date().toISOString());
+          if (!result.ok) {
+            set((state) => ({
+              live: { ...state.live, busy: false, errorHe: result.refused ? null : result.messageHe },
+            }));
+            return result.messageHe;
+          }
+          const facts = await readLiveFacts(link, vehicle, new Date().toISOString());
+          session = sessionFromFacts(facts, link.link.kind, meta(observedIgnition(facts) ?? vehicle.sim.ignition));
+        }
+        session = { ...session, kind: "post-clear", clearedCodes: cleared, clearedFromSessionId: prior.id };
+        set((state) => ({
+          sessions: appendSession(state.sessions, session),
+          live: {
+            ...state.live,
+            session: "COMPLETE",
+            busy: false,
+            errorHe: null,
+            protocolHe: session.protocolHe ?? state.live.protocolHe,
+            latestId: session.id,
+            scanThisLink: session.id,
+          },
+        }));
+        return null;
       },
 
       sampleResources: () => {

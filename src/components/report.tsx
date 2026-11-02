@@ -11,6 +11,7 @@ import {
 import type { EcuAccess, ScanSession } from "@/domain/types";
 import type { LabCheck } from "@/engine/lab";
 import { Panel, Pill, confidenceTone, severityTone } from "@/components/ui";
+import { clearNote } from "@/engine/quick-scan";
 
 export function ScanReport({
   session,
@@ -34,7 +35,7 @@ export function ScanReport({
   return (
     <div className="space-y-4">
       <Panel
-        title="סריקה מהירה"
+        title={session.kind === "post-clear" ? "סריקת אימות אחרי מחיקה" : "סריקה מהירה"}
         hint={`${when} · ${session.durationMs} ms · ${session.adapterLabelHe}`}
       >
         <p className="text-sm leading-6 text-muted">{session.vinNoteHe}</p>
@@ -42,6 +43,9 @@ export function ScanReport({
           {session.protocolHe ?? "לא זוהה פרוטוקול מנוע בסריקה הזו."}
         </p>
         {session.errorHe ? <p className="mt-2 text-sm text-bad">{session.errorHe}</p> : null}
+        {clearNote(session) ? (
+          <p className="mt-3 rounded-xl border border-warn bg-warn/10 px-3 py-2 text-sm leading-6">{clearNote(session)}</p>
+        ) : null}
       </Panel>
 
       <Panel

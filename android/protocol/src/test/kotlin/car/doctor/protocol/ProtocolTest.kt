@@ -282,11 +282,17 @@ class ObdRequestFoundationTest {
 
         val transport = MockTransport()
         val before = transport.events().size
-        val cleared = Obd2.clearCodes(caps) as ProtocolOutcome.Failed
+        val consent = ClearCodesConsent("t", understoodCodesReturn = true, understoodReadinessReset = true)
+        // The read-only profile never builds mode 04, even with consent.
+        val cleared = Obd2.clearCodes(caps, consent) as ProtocolOutcome.Failed
         assertTrue((cleared.failure as ProtocolFailure.FromProtocol).error is ProtocolError.Unsupported)
+        // A profile that lists mode 04 still refuses without the user's consent.
         val listed = caps.copy(supportedModes = caps.supportedModes + ObdMode.CLEAR_CODES)
-        val still = Obd2.clearCodes(listed) as ProtocolOutcome.Failed
+        val still = Obd2.clearCodes(listed, null) as ProtocolOutcome.Failed
         assertTrue((still.failure as ProtocolFailure.FromProtocol).error is ProtocolError.Unsupported)
+        val allowed = Obd2.clearCodes(listed, consent) as ProtocolOutcome.Ok
+        assertEquals(ProtocolRequest(0x04), allowed.value)
+        assertTrue(runCatching { ClearCodesConsent("t", true, false) }.isFailure)
         assertEquals(before, transport.events().size)
         assertFalse(transport.isConnected())
     }

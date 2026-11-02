@@ -8,6 +8,7 @@ import car.doctor.core.adapter.TransportKind
 import car.doctor.core.catalog.describeDtc
 import car.doctor.core.catalog.vinNote
 import car.doctor.core.model.AdapterKind
+import car.doctor.core.model.ClearOutcome
 import car.doctor.core.model.ConnectResult
 import car.doctor.core.model.Dtc
 import car.doctor.core.model.DtcStatus
@@ -23,6 +24,7 @@ import car.doctor.core.model.PidValue
 import car.doctor.core.model.ScanFacts
 import car.doctor.core.model.SystemGap
 import car.doctor.core.model.Vehicle
+import car.doctor.protocol.ClearCodesConsent
 import car.doctor.protocol.Elm327Protocol
 import car.doctor.protocol.ElmErrorKind
 import car.doctor.protocol.Obd2
@@ -90,6 +92,34 @@ class Elm327ObdAdapter(
         if (facts.ecus.none { it.id == EcuId.ENGINE && it.access == EcuAccess.CHECKED }) return null
         val rpm = facts.pids.firstOrNull { it.id == "rpm" }?.value
         return if (rpm != null && rpm >= RUNNING_RPM) IgnitionState.RUNNING else IgnitionState.ON
+    }
+
+    /**
+     * Mode 04 on the real car. Before sending it, reads RPM and speed from the car:
+     * the engine must be off (ignition ON) and the vehicle still. Afterwards the cached
+     * snapshot is dropped so the verification scan reads the car again.
+     */
+    override fun clearCodes(confirmedAt: String): ClearOutcome {
+        val speed = guardPid(ObdPid.VEHICLE_SPEED)
+            ?: return ClearOutcome.Refused("לא הצלחנו לוודא מהרכב שהוא עומד. לא בוצעה מחיקה.")
+        if (speed > 0.0) return ClearOutcome.Refused("הרכב בתנועה. עוצרים לפני מחיקת קודים.")
+        val rpm = guardPid(ObdPid.ENGINE_RPM)
+        if (rpm != null && rpm > 0.0) return ClearOutcome.Refused(ENGINE_RUNNING_HE)
+
+        val consent = ClearCodesConsent(confirmedAt, understoodCodesReturn = true, understoodReadinessReset = true)
+        val outcome = protocol.clearCodes(consent)
+        memo = null
+        memoAt = null
+        return when (outcome) {
+            is ProtocolOutcome.Ok -> ClearOutcome.Cleared
+            is ProtocolOutcome.Failed -> clearFailure(outcome.failure)
+        }
+    }
+
+    private fun guardPid(pid: ObdPid): Double? {
+        val request = (Obd2.requestPid(pid, protocol.capabilities) as? ProtocolOutcome.Ok)?.value ?: return null
+        val response = (protocol.request(request) as? ProtocolOutcome.Ok)?.value ?: return null
+        return (Obd2.decodePid(response) as? ProtocolOutcome.Ok)?.value?.value
     }
 
     override fun release() {
@@ -396,6 +426,22 @@ private fun connectMessage(failure: ProtocolFailure, adapterError: ElmErrorKind?
             else -> "המתאם החזיר תשובה לא צפויה בזמן האתחול."
         }
     }
+}
+
+private const val ENGINE_RUNNING_HE =
+    "המנוע פועל. מכבים את המנוע, משאירים את ההצתה במצב ON, ואז מוחקים. רוב היחידות מסרבות למחוק כשהמנוע מסתובב."
+
+private fun clearFailure(failure: ProtocolFailure): ClearOutcome {
+    val error = (failure as? ProtocolFailure.FromProtocol)?.error
+    if (error is ProtocolError.UnexpectedResponse && error.detail == "negative-clear-22") {
+        return ClearOutcome.Refused(ENGINE_RUNNING_HE)
+    }
+    if (error is ProtocolError.UnexpectedResponse && error.detail.startsWith("negative-clear")) {
+        return ClearOutcome.Refused("יחידת המנוע סירבה למחוק את הקודים. לא נמחק דבר.")
+    }
+    return ClearOutcome.Failed(
+        "המחיקה לא אושרה על ידי הרכב. ייתכן שחלק מהיחידות נמחקו וחלק לא. סריקת האימות תראה מה המצב.",
+    )
 }
 
 private fun round1(value: Double): Double = round(value * 10.0) / 10.0

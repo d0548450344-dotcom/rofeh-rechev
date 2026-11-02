@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Vehicle } from "../domain/types.ts";
 import { parseElm, codePairs, formatDtc } from "./elm-parser.ts";
-import { Elm327Session, ElmLinkError, type ByteLink } from "./elm327.ts";
-import { observedIgnition, probeLive, readLiveFacts } from "./live-adapter.ts";
+import { Elm327Session, ElmLinkError, WRITE_AND_FLASH_SERVICES, type ByteLink } from "./elm327.ts";
+import { clearLive, observedIgnition, probeLive, readLiveFacts } from "./live-adapter.ts";
 
 /** A car behind an ELM327, at the text level. */
 function fakeCar(replies: Record<string, string>, opts: { dropOn?: string } = {}) {
@@ -144,4 +144,44 @@ test("link lost mid-scan yields a communication error, not a clean result", asyn
 test("init errors are typed", async () => {
   const session = new Elm327Session(fakeCar({ ATE0: "?" }).link);
   await assert.rejects(session.init(), (error: unknown) => error instanceof ElmLinkError && error.reason === "not_elm");
+});
+
+const ENGINE_OFF = { ...RUNNING, "010C": "41 0C 00 00", "04": "44" };
+
+test("clearing with the engine off sends 04 exactly once", async () => {
+  const car = fakeCar(ENGINE_OFF);
+  const session = new Elm327Session(car.link);
+  await probeLive(session);
+  assert.deepEqual(await clearLive(session, "t"), { ok: true });
+  assert.equal(car.sent.filter((cmd) => cmd === "04").length, 1);
+});
+
+test("clearing is refused while the engine runs, and 04 is never sent", async () => {
+  const car = fakeCar({ ...RUNNING, "04": "44" });
+  const session = new Elm327Session(car.link);
+  await probeLive(session);
+  const result = await clearLive(session, "t");
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.messageHe, /המנוע פועל/);
+  assert.equal(car.sent.includes("04"), false);
+});
+
+test("an ECU refusal (7F 04 22) is reported, not treated as cleared", async () => {
+  const session = new Elm327Session(fakeCar({ ...ENGINE_OFF, "04": "7F 04 22" }).link);
+  await probeLive(session);
+  const result = await clearLive(session, "t");
+  assert.equal(result.ok, false);
+});
+
+test("flashing, coding and security access can never be sent", async () => {
+  const car = fakeCar(RUNNING);
+  const session = new Elm327Session(car.link);
+  await probeLive(session);
+  const before = car.sent.length;
+  for (const service of WRITE_AND_FLASH_SERVICES) {
+    const reply = await session.request(service, [0x01, 0x02]);
+    assert.equal(reply.ok, false);
+  }
+  assert.equal((await session.request(0x04)).ok, false);
+  assert.equal(car.sent.length, before);
 });

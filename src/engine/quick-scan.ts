@@ -56,3 +56,14 @@ export function performQuickScan(args: ScanMeta & { transport: ObdTransport }): 
   const facts = args.transport.readFacts(args.finishedAt);
   return sessionFromFacts(facts, args.transport.kind, args);
 }
+
+/** What clearing did, in plain words. Mirrors SessionPresenter.clearNote on Android. */
+export function clearNote(session: ScanSession): string | null {
+  const cleared = session.clearedCodes ?? [];
+  if (cleared.length === 0) return null;
+  const back = [...new Set(session.dtcs.map((dtc) => dtc.code).filter((code) => cleared.includes(code)))];
+  const list = cleared.join(", ");
+  return back.length === 0
+    ? `נמחקו: ${list}. אף קוד לא חזר בסריקה המיידית. זה עדיין לא אומר שהתקלה תוקנה: סורקים שוב אחרי כמה נסיעות. תקלה אמיתית תחזיר את הקוד ותדליק שוב את הנורה. מוכנות המערכות התאפסה ותתמלא מחדש תוך כמה נסיעות.`
+    : `נמחקו: ${list}. חזרו מיד: ${back.join(", ")}. כלומר התקלה עדיין פעילה, והמחיקה לא שינתה דבר.`;
+}

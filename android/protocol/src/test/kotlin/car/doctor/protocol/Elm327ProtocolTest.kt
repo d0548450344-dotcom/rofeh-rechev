@@ -254,6 +254,56 @@ class Elm327ProtocolTest {
         assertEquals(ProtocolState.DISCONNECTED, protocol.state())
     }
 
+    private val consent = ClearCodesConsent("t", understoodCodesReturn = true, understoodReadinessReset = true)
+
+    @Test
+    fun `clear codes with consent sends mode 04 once and reports success`() {
+        val elm = FakeElm().withCar().apply { reply("04", "44") }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+
+        assertTrue(protocol.clearCodes(consent) is ProtocolOutcome.Ok)
+        assertEquals(1, elm.sent.count { it == "04" })
+        assertEquals(ProtocolState.READY, protocol.state())
+    }
+
+    @Test
+    fun `an ECU that refuses the clear is reported, not treated as cleared`() {
+        val elm = FakeElm().withCar().apply { reply("04", "7F 04 22") }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+
+        val outcome = protocol.clearCodes(consent) as ProtocolOutcome.Failed
+        val error = (outcome.failure as ProtocolFailure.FromProtocol).error as ProtocolError.UnexpectedResponse
+        assertEquals("negative-clear-22", error.detail)
+    }
+
+    @Test
+    fun `the generic request path still refuses mode 04`() {
+        val elm = FakeElm().withCar()
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val before = elm.sent.size
+
+        assertTrue(protocol.request(ProtocolRequest(0x04)) is ProtocolOutcome.Failed)
+        assertEquals(before, elm.sent.size)
+    }
+
+    @Test
+    fun `flashing, coding and security access can never be sent`() {
+        val elm = FakeElm().withCar()
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val before = elm.sent.size
+
+        for (service in WRITE_AND_FLASH_SERVICES) {
+            val outcome = protocol.request(ProtocolRequest(service, listOf(0x01, 0x02)))
+            assertTrue("service 0x%02X".format(service), outcome is ProtocolOutcome.Failed)
+        }
+        assertEquals(before, elm.sent.size)
+        assertTrue(listOf(0x27, 0x2E, 0x31, 0x34, 0x36, 0x3D).all { it in WRITE_AND_FLASH_SERVICES })
+    }
+
     @Test
     fun `parser handles status words`() {
         assertEquals(ElmResponseParser.Result.NoData, ElmResponseParser.parse("NO DATA\r\r>"))

@@ -11,6 +11,7 @@ import car.doctor.core.catalog.describeDtc
 import car.doctor.core.catalog.vinNote
 import car.doctor.core.machine.IgnitionStateMachine
 import car.doctor.core.model.AdapterKind
+import car.doctor.core.model.ClearOutcome
 import car.doctor.core.model.ConnectResult
 import car.doctor.core.model.Dtc
 import car.doctor.core.model.DtcStatus
@@ -24,6 +25,7 @@ import car.doctor.core.model.PidQuality
 import car.doctor.core.model.PidValue
 import car.doctor.core.model.ScanFacts
 import car.doctor.core.model.Vehicle
+import car.doctor.protocol.ClearCodesConsent
 import car.doctor.protocol.DiagnosticProtocol
 import car.doctor.protocol.MockProtocol
 import car.doctor.protocol.Obd2
@@ -51,7 +53,7 @@ class MockObdAdapter(
 ) : ObdAdapter {
     constructor(vehicle: Vehicle, transport: ObdTransport) : this(
         vehicle,
-        MockProtocol(transport, Obd2Profile.foundation),
+        MockProtocol(transport, Obd2Profile.withClear),
     )
 
     private var memoAt: String? = null
@@ -97,6 +99,44 @@ class MockObdAdapter(
     override fun readPids(readAt: String): List<PidValue> = snapshot(readAt).pids
 
     override fun readFacts(readAt: String): ScanFacts = snapshot(readAt)
+
+    override fun clearCodes(confirmedAt: String): ClearOutcome {
+        when (val guard = clearGuard(confirmedAt)) {
+            null -> Unit
+            else -> return guard
+        }
+        val consent = ClearCodesConsent(confirmedAt, understoodCodesReturn = true, understoodReadinessReset = true)
+        val request = when (val built = Obd2.clearCodes(protocol.capabilities, consent)) {
+            is ProtocolOutcome.Failed -> return ClearOutcome.Refused("המתאם המדומה לא מאפשר מחיקה בפרופיל הזה.")
+            is ProtocolOutcome.Ok -> built.value
+        }
+        val response = when (val asked = ask(request)) {
+            is Read.Stop -> return ClearOutcome.Failed("המחיקה לא אושרה: הייתה שגיאת תקשורת. ייתכן שחלק מהיחידות לא נמחקו.")
+            is Read.Value -> asked.value
+        }
+        memo = null
+        memoAt = null
+        return when (Obd2.decodeClear(response)) {
+            is ProtocolOutcome.Ok -> ClearOutcome.Cleared
+            is ProtocolOutcome.Failed -> ClearOutcome.Refused(ENGINE_RUNNING_HE)
+        }
+    }
+
+    /** Checks on the (simulated) car itself: engine stopped, vehicle still. */
+    private fun clearGuard(readAt: String): ClearOutcome? {
+        val rpm = readGuardPid(ObdPid.ENGINE_RPM, readAt)
+        val speed = readGuardPid(ObdPid.VEHICLE_SPEED, readAt)
+        if (speed == null) return ClearOutcome.Refused("לא הצלחנו לוודא שהרכב עומד. לא בוצעה מחיקה.")
+        if (speed > 0.0) return ClearOutcome.Refused("הרכב בתנועה. עוצרים לפני מחיקת קודים.")
+        if (rpm != null && rpm > 0.0) return ClearOutcome.Refused(ENGINE_RUNNING_HE)
+        return null
+    }
+
+    private fun readGuardPid(pid: ObdPid, readAt: String): Double? {
+        val request = (Obd2.requestPid(pid, protocol.capabilities) as? ProtocolOutcome.Ok)?.value ?: return null
+        val response = (ask(request) as? Read.Value)?.value ?: return null
+        return (Obd2.decodePid(response) as? ProtocolOutcome.Ok)?.value?.value
+    }
 
     override fun release() {
         protocol.disconnect()
@@ -441,6 +481,9 @@ private fun unavailable(
 
 private fun round1(value: Double): Double = round(value * 10.0) / 10.0
 
+private const val ENGINE_RUNNING_HE =
+    "המנוע פועל. מכבים את המנוע, משאירים את ההצתה במצב ON, ואז מוחקים. רוב היחידות מסרבות למחוק כשהמנוע מסתובב."
+
 const val MOCK_ADAPTER_ID = "MOCK-OBD-001"
 
 val MOCK_CAPABILITIES: Set<AdapterCapability> = setOf(
@@ -454,7 +497,7 @@ class MockObdAdapterFactory(
     val transport: ObdTransport = MockTransport(),
 ) : ObdAdapterFactory {
     private var pictured: Vehicle? = null
-    val protocol: MockProtocol = MockProtocol(transport, Obd2Profile.foundation)
+    val protocol: MockProtocol = MockProtocol(transport, Obd2Profile.withClear)
 
     init {
         if (transport is MockTransport) {

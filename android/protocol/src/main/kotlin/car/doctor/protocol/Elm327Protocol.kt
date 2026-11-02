@@ -33,9 +33,10 @@ fun interface ElmSleeper {
 /**
  * Real OBD-II over an ELM327 (or compatible) adapter, on any [ObdTransport].
  *
- * Read-only by construction: it only ever sends the AT setup commands listed in
- * [INIT_COMMANDS] and requests built by [Obd2]. Mode 04 (clear codes) is refused here
- * as well, even if a caller hand-builds the request.
+ * Reads through [request], which accepts only [READ_ONLY_SERVICES]. The single write is
+ * mode 04 (clear codes) through [clearCodes], which needs a [ClearCodesConsent].
+ * Flashing, coding, security access and every other service in
+ * [WRITE_AND_FLASH_SERVICES] cannot be sent at all.
  *
  * All calls block. Run them off the UI thread.
  */
@@ -156,7 +157,7 @@ class Elm327Protocol(
 
     @Synchronized
     override fun request(request: ProtocolRequest): ProtocolOutcome<ProtocolResponse> {
-        if (request.service == ObdMode.CLEAR_CODES.service || request.service !in READ_ONLY_SERVICES) {
+        if (request.service !in READ_ONLY_SERVICES) {
             return failProtocol(ProtocolError.Unsupported("service-${request.service}"))
         }
         if (machine.state == ProtocolState.READY && !transport.isConnected()) {
@@ -191,6 +192,58 @@ class Elm327Protocol(
     }
 
     override fun events(): List<ProtocolEvent> = seen.toList()
+
+    /**
+     * Mode 04. Clears stored and pending codes, freeze frame and readiness monitors on every
+     * emissions ECU that answers. It cannot clear permanent codes and it fixes nothing.
+     * Most ECUs refuse it while the engine runs (negative answer 0x22).
+     */
+    @Synchronized
+    fun clearCodes(consent: ClearCodesConsent): ProtocolOutcome<Unit> {
+        val built = Obd2.clearCodes(capabilities + ObdMode.CLEAR_CODES, consent)
+        if (built is ProtocolOutcome.Failed) return built
+        if (machine.state == ProtocolState.READY && !transport.isConnected()) {
+            machine.transition(ProtocolState.DISCONNECTED)
+        }
+        if (machine.state != ProtocolState.READY) {
+            return failTransport(TransportFailure.Disconnected("not-connected"))
+        }
+        check(machine.transition(ProtocolState.EXCHANGING))
+        seen += ProtocolEvent.RequestStarted(ObdMode.CLEAR_CODES.service)
+        log.request(ObdMode.CLEAR_CODES.service)
+        val text = when (val reply = exchange("04", CLEAR_TIMEOUT_MS)) {
+            is Exchange.Failed -> return when (val f = finish(reply.failure)) {
+                is ProtocolOutcome.Failed -> f
+                is ProtocolOutcome.Ok -> ProtocolOutcome.Ok(Unit)
+            }
+            is Exchange.Text -> reply.text
+        }
+        val response = when (val parsed = ElmResponseParser.parse(text, "04")) {
+            ElmResponseParser.Result.NoData -> return finishProtocol(ProtocolError.MissingPayload("no-clear-confirmation")).unit()
+            is ElmResponseParser.Result.AdapterError -> return finishProtocol(ProtocolError.MalformedFrame(parsed.word)).unit()
+            is ElmResponseParser.Result.Messages -> {
+                val positive = parsed.messages.firstOrNull { it.firstOrNull() == 0x44 }
+                val negative = parsed.messages.firstOrNull { it.size >= 2 && it[0] == NEGATIVE && it[1] == 0x04 }
+                when {
+                    positive != null -> ok(0x44, emptyList())
+                    negative != null -> ok(NEGATIVE, negative.drop(1))
+                    else -> return finishProtocol(ProtocolError.UnexpectedResponse("service")).unit()
+                }
+            }
+        }
+        return when (response) {
+            is ProtocolOutcome.Failed -> response
+            is ProtocolOutcome.Ok -> Obd2.decodeClear(response.value)
+        }
+    }
+
+    private fun ProtocolOutcome<ProtocolResponse>.unit(): ProtocolOutcome<Unit> = when (this) {
+        is ProtocolOutcome.Failed -> this
+        is ProtocolOutcome.Ok -> ProtocolOutcome.Ok(Unit)
+    }
+
+    private operator fun ProtocolCapabilities.plus(mode: ObdMode): ProtocolCapabilities =
+        copy(supportedModes = supportedModes + mode)
 
     private fun respond(
         request: ProtocolRequest,
@@ -329,6 +382,7 @@ class Elm327Protocol(
         private const val NEGATIVE = 0x7F
         private const val READ_CHUNK = 512
         private const val MAX_REPLY_CHARS = 16_384
+        private const val CLEAR_TIMEOUT_MS = 10_000L
 
         /**
          * Setup sequence: reset, echo off, linefeeds off, spaces on, headers off,
@@ -338,8 +392,12 @@ class Elm327Protocol(
         private val REQUIRED_COMMANDS = setOf("ATE0", "ATH0", "ATSP0")
         private val RESET_COMMANDS = setOf("ATZ")
 
-        /** Services this driver will put on the bus. 0x04 (clear) is deliberately absent. */
+        /** Services [request] will put on the bus. 0x04 (clear) only goes through [clearCodes]. */
         val READ_ONLY_SERVICES: Set<Int> = setOf(0x01, 0x02, 0x03, 0x07, 0x09, 0x0A)
+
+        init {
+            check(READ_ONLY_SERVICES.none { it in WRITE_AND_FLASH_SERVICES || it == 0x04 })
+        }
 
         private fun hex(value: Int): String = "%02X".format(value and 0xFF)
     }

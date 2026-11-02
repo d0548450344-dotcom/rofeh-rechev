@@ -7,6 +7,8 @@ import car.doctor.core.machine.IgnitionStateMachine
 import car.doctor.core.machine.ObdSessionStateMachine
 import car.doctor.core.machine.ignitionMoves
 import car.doctor.core.machine.shouldCommitScan
+import car.doctor.core.model.ClearConfirmation
+import car.doctor.core.model.ClearOutcome
 import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.FaultId
 import car.doctor.core.model.IgnitionState
@@ -36,6 +38,8 @@ data class BenchCapabilities(
     val canConnect: Boolean,
     val canScan: Boolean,
     val canDisconnect: Boolean,
+    /** True right after a scan on this link that found codes. Clearing needs that saved scan. */
+    val canClear: Boolean = false,
 )
 
 data class BenchSnapshot(
@@ -73,6 +77,9 @@ class VehicleBench(
     private var protocolHe: String? = null
     private var errorHe: String? = null
     private var scanEpoch: Long = 0
+
+    /** The scan made on the current link. Clearing is allowed only right after it. */
+    private var lastScanThisLink: String? = null
 
     /** Steps applied by the latest operation. Empty when the call was rejected. */
     var lastTransitionTrace: List<ObdSessionState> = emptyList()
@@ -165,6 +172,7 @@ class VehicleBench(
             return rejected("אי אפשר להתחבר מהמצב הנוכחי. קודם מתנתקים.")
         }
         resetTrace()
+        lastScanThisLink = null
         move(ObdSessionState.CONNECTING)
         val result = adapters.open(vehicle).probe()
         if (!result.ok) {
@@ -194,7 +202,40 @@ class VehicleBench(
         return accepted()
     }
 
-    fun quickScan(): BenchEffect {
+    fun quickScan(): BenchEffect = scan { it }
+
+    /**
+     * Clears stored and pending codes (OBD mode 04), then immediately rescans so the user
+     * sees what came back. Guards, in order:
+     *  1. the user acknowledged both warnings;
+     *  2. a scan on this same link just finished and found codes, and it is already saved,
+     *     so nothing is lost;
+     *  3. the adapter checks on the car that the engine is off and the vehicle is still.
+     * Clearing never repairs anything; a real fault sets its code again.
+     */
+    fun clearCodes(confirmation: ClearConfirmation): BenchEffect {
+        if (!confirmation.complete) return rejected("צריך לאשר את שתי האזהרות לפני מחיקה.")
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        if (obd.state != ObdSessionState.COMPLETE) {
+            return rejected("מחיקה אפשרית רק מיד אחרי סריקה, כשהמתאם עדיין מחובר.")
+        }
+        val prior = repository.sessionsFor(vehicle.id).firstOrNull { it.id == lastScanThisLink }
+            ?: return rejected("סורקים קודם, כדי שהקודים יישמרו לפני המחיקה.")
+        if (prior.dtcs.isEmpty()) return rejected("אין קודים למחוק בסריקה האחרונה.")
+
+        when (val outcome = adapters.open(vehicle).clearCodes(clock.now())) {
+            is ClearOutcome.Refused -> return rejected(outcome.messageHe)
+            is ClearOutcome.Failed -> {
+                errorHe = outcome.messageHe
+                return rejected(outcome.messageHe)
+            }
+            ClearOutcome.Cleared -> Unit
+        }
+        val cleared = prior.dtcs.map { it.code }.distinct()
+        return scan { it.copy(kind = "post-clear", clearedCodes = cleared, clearedFromSessionId = prior.id) }
+    }
+
+    private fun scan(decorate: (DiagnosticSession) -> DiagnosticSession): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         if (!obd.canTransition(ObdSessionState.SCANNING)) {
             return rejected("סריקה דורשת חיבור. קודם מתחברים למתאם.")
@@ -207,22 +248,25 @@ class VehicleBench(
             return rejected("הסריקה הופסקה לפני שהושלמה. לא נשמרה תוצאה חלקית.")
         }
         val finishedAt = clock.now()
-        val session = QuickScan.run(
-            QuickScanRequest(
-                adapter = adapters.open(vehicle),
-                vehicleId = vehicle.id,
-                ignition = vehicle.sim.ignition,
-                posture = vehicle.sim.posture,
-                id = ids.next("scan"),
-                startedAt = startedAt,
-                finishedAt = finishedAt,
-                durationMs = 0,
-            ),
-        ).copy(labFaults = vehicle.sim.faults.toList(), labLostEcu = vehicle.sim.lostEcu)
+        val session = decorate(
+            QuickScan.run(
+                QuickScanRequest(
+                    adapter = adapters.open(vehicle),
+                    vehicleId = vehicle.id,
+                    ignition = vehicle.sim.ignition,
+                    posture = vehicle.sim.posture,
+                    id = ids.next("scan"),
+                    startedAt = startedAt,
+                    finishedAt = finishedAt,
+                    durationMs = 0,
+                ),
+            ).copy(labFaults = vehicle.sim.faults.toList(), labLostEcu = vehicle.sim.lostEcu),
+        )
         if (!shouldCommitScan(epoch, scanEpoch, obd.state)) {
             return rejected("הסריקה הופסקה לפני שהושלמה. לא נשמרה תוצאה חלקית.")
         }
         repository.appendSession(session)
+        lastScanThisLink = session.id
         move(ObdSessionState.COMPLETE)
         protocolHe = session.protocolHe
         errorHe = null
@@ -249,6 +293,7 @@ class VehicleBench(
     }
 
     private fun releaseTransport() {
+        lastScanThisLink = null
         val vehicle = selected() ?: return
         adapters.open(vehicle).release()
     }
@@ -272,7 +317,14 @@ class VehicleBench(
         canConnect = obd.canTransition(ObdSessionState.CONNECTING),
         canScan = obd.canTransition(ObdSessionState.SCANNING),
         canDisconnect = ObdSessionStateMachine.disconnectPath(obd.state)?.isNotEmpty() == true,
+        canClear = obd.state == ObdSessionState.COMPLETE && lastScanHadCodes(),
     )
+
+    private fun lastScanHadCodes(): Boolean {
+        val id = lastScanThisLink ?: return false
+        val vehicle = selected() ?: return false
+        return repository.sessionsFor(vehicle.id).firstOrNull { it.id == id }?.dtcs?.isNotEmpty() == true
+    }
 
     private fun buildSnapshot(): BenchSnapshot {
         val vehicle = selected()

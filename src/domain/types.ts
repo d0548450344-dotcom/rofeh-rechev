@@ -143,7 +143,7 @@ export interface ConnectResult {
 export interface ScanSession {
   id: string;
   vehicleId: string;
-  kind: "quick";
+  kind: "quick" | "post-clear";
   adapterKind: AdapterKind;
   adapterLabelHe: string;
   startedAt: string;
@@ -163,4 +163,8 @@ export interface ScanSession {
   labFaults: FaultId[];
   labLostEcu: EcuId | null;
   errorHe: string | null;
+  /** Codes cleared right before this verification scan. Absent on a normal scan. */
+  clearedCodes?: string[];
+  /** The scan whose codes were cleared. */
+  clearedFromSessionId?: string | null;
 }

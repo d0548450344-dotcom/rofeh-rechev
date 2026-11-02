@@ -67,6 +67,8 @@ data class SessionView(
     val samplesNoteHe: String?,
     val monitors: List<MonitorLine>,
     val monitorsNoteHe: String?,
+    /** Set on the verification scan right after clearing codes. */
+    val clearNoteHe: String? = null,
 )
 
 /**
@@ -75,13 +77,33 @@ data class SessionView(
  */
 object SessionPresenter {
     fun present(session: DiagnosticSession): SessionView {
-        val headline = if (session.findings.isEmpty()) {
+        val headline = if (session.clearedCodes.isNotEmpty()) {
+            "סריקת אימות אחרי מחיקת קודים."
+        } else if (session.findings.isEmpty()) {
             CLEAR_SCAN_HE
         } else {
             "${session.findings.size} ממצאים לפי הנתונים שנבדקו."
         }
         val checked = session.ecus.any { it.access == EcuAccess.CHECKED }
         val failed = session.ecus.any { it.access == EcuAccess.COMM_ERROR }
+        return buildView(session, headline, checked, failed).copy(clearNoteHe = clearNote(session))
+    }
+
+    /** What clearing did, in plain words. Clearing hides a code; it never fixes the cause. */
+    fun clearNote(session: DiagnosticSession): String? {
+        if (session.clearedCodes.isEmpty()) return null
+        val back = session.dtcs.map { it.code }.filter { it in session.clearedCodes }.distinct()
+        val cleared = session.clearedCodes.joinToString(", ")
+        return if (back.isEmpty()) {
+            "נמחקו: $cleared. אף קוד לא חזר בסריקה המיידית. זה עדיין לא אומר שהתקלה תוקנה: " +
+                "סורקים שוב אחרי כמה נסיעות. תקלה אמיתית תחזיר את הקוד ותדליק שוב את הנורה. " +
+                "מוכנות המערכות התאפסה ותתמלא מחדש תוך כמה נסיעות."
+        } else {
+            "נמחקו: $cleared. חזרו מיד: ${back.joinToString(", ")}. כלומר התקלה עדיין פעילה, והמחיקה לא שינתה דבר."
+        }
+    }
+
+    private fun buildView(session: DiagnosticSession, headline: String, checked: Boolean, failed: Boolean): SessionView {
         return SessionView(
             id = session.id,
             headlineHe = headline,

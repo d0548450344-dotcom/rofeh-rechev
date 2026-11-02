@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import car.doctor.app.ClearStep
 import car.doctor.app.DoctorScreen
 import car.doctor.app.DoctorUi
 import car.doctor.app.DoctorViewModel
@@ -72,6 +75,7 @@ fun DoctorApp(vm: DoctorViewModel) {
         }
         NavBar(vm)
     }
+    ClearDialogs(vm)
 }
 
 @Composable
@@ -134,7 +138,7 @@ private fun NavItem(
 private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
     Text("רופא רכב", fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
     Text(
-        "קריאה בלבד: קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. אין מחיקת קודים.",
+        "קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. מחיקת קודים עם הגנות; אין צריבה.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 15.sp,
         lineHeight = 22.sp,
@@ -210,6 +214,9 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
         right = { PrimaryAction("סריקה מהירה", ui.canScan) { vm.scan() } },
     )
     QuietAction("נתק", ui.canDisconnect, false) { vm.disconnect() }
+    if (ui.canClear) {
+        QuietAction("מחיקת קודי תקלה…", enabled = true, selected = false) { vm.startClear() }
+    }
     ui.latest?.let {
         QuietAction("פתח את התוצאה האחרונה", enabled = true, selected = false) { vm.showResult() }
     }
@@ -322,9 +329,10 @@ private fun SettingsPage(ui: DoctorUi) {
             SectionLabel("האפליקציה")
             StateLine("גרסה", "0.2.0")
             StateLine("מתאם", ui.sourceLabelHe)
-            StateLine("כתיבה ליחידה", "חסומה")
+            StateLine("כתיבה ליחידה", "מחיקת קודים בלבד")
+            StateLine("צריבה / שיפור כוח", "חסומה")
             Text(
-                "רופא רכב קורא בלבד. אין מחיקת קודים, אין צריבה, אין גישת אבטחה ואין ענן. גם במתאם אמיתי האפליקציה לא שולחת פקודת מחיקה.",
+                "רופא רכב קורא נתונים, ומוחק קודי תקלה רק אחרי שני אישורים, כשהמנוע כבוי והרכב עומד. אין צריבה, אין שינוי תוכנה ביחידות, אין גישת אבטחה ואין ענן.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 20.sp,
             )
@@ -361,6 +369,11 @@ private fun SettingsPage(ui: DoctorUi) {
 @Composable
 private fun SessionBody(session: SessionView) {
     Text(session.headlineHe, fontWeight = FontWeight.Medium, lineHeight = 22.sp)
+    session.clearNoteHe?.let {
+        Panel {
+            Text(it, modifier = Modifier.padding(12.dp), lineHeight = 20.sp)
+        }
+    }
     session.protocolHe?.let {
         Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
     }
@@ -549,4 +562,42 @@ private fun Busy(text: String) {
 @Composable
 private fun Note(text: String) {
     Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, lineHeight = 18.sp)
+}
+
+/**
+ * Two steps before any code is cleared. The bench then still checks, on the car,
+ * that the engine is off and the vehicle is still. Nothing here can flash or code.
+ */
+@Composable
+private fun ClearDialogs(vm: DoctorViewModel) {
+    when (vm.clearStep) {
+        ClearStep.NONE -> Unit
+        ClearStep.WARN -> AlertDialog(
+            onDismissRequest = { vm.cancelClear() },
+            title = { Text("מחיקה לא מתקנת תקלה") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("מחיקה מכבה את נורת התקלה ומוחקת את הקודים השמורים והממתינים. היא לא מתקנת דבר.", lineHeight = 20.sp)
+                    Text("אם התקלה אמיתית, הקוד יחזור, לפעמים כבר בנסיעה הבאה.", lineHeight = 20.sp)
+                    Text("הסריקה הנוכחית כבר שמורה בהיסטוריה, כך שהקודים לא ילכו לאיבוד.", lineHeight = 20.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.clearNext() }) { Text("הבנתי, המשך") } },
+            dismissButton = { TextButton(onClick = { vm.cancelClear() }) { Text("ביטול") } },
+        )
+        ClearStep.CONFIRM -> AlertDialog(
+            onDismissRequest = { vm.cancelClear() },
+            title = { Text("לפני שמוחקים") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("מוכנות המערכות תתאפס. רכב שנמחקו לו קודים ממש לפני טסט עלול להיכשל בו עד שהמערכות ייבדקו מחדש, בדרך כלל אחרי כמה נסיעות.", lineHeight = 20.sp)
+                    Text("המנוע צריך להיות כבוי וההצתה במצב ON. הרכב עומד.", lineHeight = 20.sp)
+                    Text("קודים קבועים (Permanent) לא נמחקים ממתאם. רק הרכב מוחק אותם אחרי תיקון.", lineHeight = 20.sp)
+                    Text("אחרי המחיקה תרוץ סריקת אימות אוטומטית.", lineHeight = 20.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.confirmClear() }) { Text("מחק קודים") } },
+            dismissButton = { TextButton(onClick = { vm.cancelClear() }) { Text("ביטול") } },
+        )
+    }
 }

@@ -20,6 +20,7 @@ import car.doctor.core.catalog.postureLabel
 import car.doctor.core.catalog.sessionLabel
 import car.doctor.core.catalog.vinNote
 import car.doctor.core.machine.IgnitionMove
+import car.doctor.core.model.ClearConfirmation
 import car.doctor.core.model.FaultId
 import car.doctor.core.model.Fuel
 import car.doctor.core.model.IgnitionState
@@ -36,6 +37,9 @@ import java.util.concurrent.Executors
 enum class DoctorScreen { HOME, BENCH, RESULT, HISTORY, SETTINGS }
 
 enum class PickerMode { NONE, BLUETOOTH, WIFI }
+
+/** Clear-codes flow: nothing, first warning, second confirmation. */
+enum class ClearStep { NONE, WARN, CONFIRM }
 
 data class VehicleCard(
     val id: String,
@@ -71,6 +75,8 @@ data class DoctorUi(
     /** Set while the adapter is being talked to. Buttons stay disabled until it clears. */
     val busyHe: String?,
     val canChangeSource: Boolean,
+    /** A scan on this link just found codes; clearing them is possible. */
+    val canClear: Boolean,
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -122,6 +128,9 @@ class DoctorViewModel(
         private set
     var wifiHost by mutableStateOf(WIFI_DEFAULT_HOST)
     var wifiPort by mutableStateOf(WIFI_DEFAULT_PORT.toString())
+
+    var clearStep by mutableStateOf(ClearStep.NONE)
+        private set
 
     var ui by mutableStateOf(compose())
         private set
@@ -219,6 +228,35 @@ class DoctorViewModel(
         openId = id
         screen = DoctorScreen.RESULT
         ui = compose()
+    }
+
+    // ---- Clear codes: two confirmations, then the bench re-checks everything ----
+
+    fun startClear() {
+        if (ui.canClear) clearStep = ClearStep.WARN
+    }
+
+    fun clearNext() {
+        if (clearStep == ClearStep.WARN) clearStep = ClearStep.CONFIRM
+    }
+
+    fun cancelClear() {
+        clearStep = ClearStep.NONE
+    }
+
+    fun confirmClear() {
+        if (clearStep != ClearStep.CONFIRM) return
+        clearStep = ClearStep.NONE
+        act("מוחק קודים ומריץ סריקת אימות…") {
+            val effect = bench.clearCodes(ClearConfirmation(understoodCodesReturn = true, understoodReadinessReset = true))
+            noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
+            if (effect is BenchEffect.Accepted) {
+                openId = bench.snapshot().historyIds.firstOrNull()
+                DoctorScreen.RESULT
+            } else {
+                null
+            }
+        }
     }
 
     // ---- Adapter picker ----
@@ -393,6 +431,7 @@ class DoctorViewModel(
             live = source.isLive,
             busyHe = busyHe?.takeIf { it.isNotEmpty() },
             canChangeSource = idle,
+            canClear = idle && vehicle != null && snap.capabilities.canClear,
         )
     }
 

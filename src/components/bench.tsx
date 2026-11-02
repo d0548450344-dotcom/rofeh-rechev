@@ -13,7 +13,7 @@ import { ignitionMoves } from "@/domain/machines";
 import type { EcuId, Posture } from "@/domain/types";
 import { Empty, Panel, Pill } from "@/components/ui";
 import { ScanReport } from "@/components/report";
-import { labFor, latestFor, useGarage, type AdapterMode } from "@/store/garage";
+import { canClearCodes, labFor, latestFor, useGarage, type AdapterMode } from "@/store/garage";
 import { webBluetoothSupported, webSerialSupported } from "@/live/web-links";
 
 const POSTURES: Posture[] = ["idle", "straight", "turn", "brake"];
@@ -37,6 +37,8 @@ export function Bench() {
   const setAdapterMode = useGarage((state) => state.setAdapterMode);
   const [note, setNote] = useState<string | null>(null);
   const realCar = adapterMode !== "simulated";
+  const clearCodes = useGarage((state) => state.clearCodes);
+  const clearable = useGarage(canClearCodes);
 
   const vehicle = vehicles.find((item) => item.id === selectedId) ?? null;
   const latest = sessions.find((session) => session.id === live.latestId) ?? latestFor(sessions, selectedId);
@@ -203,7 +205,7 @@ export function Bench() {
       <div className="space-y-4">
         <Panel
           title={realCar ? ADAPTER_MODE_LABEL[adapterMode] : "מתאם מדומה"}
-          hint="קריאה בלבד. האפליקציה לא שולחת פקודת מחיקת קודים ולא כותבת לרכב."
+          hint="אין צריבה ואין שינוי תוכנה ביחידות. מחיקת קודים רק אחרי סריקה ושני אישורים."
         >
           <div className="grid gap-2 sm:grid-cols-3">
             <Action
@@ -240,6 +242,16 @@ export function Bench() {
             />
           </div>
         </Panel>
+
+        {clearable ? (
+          <ClearCodesPanel
+            onClear={async () => {
+              setNote(null);
+              const refusal = await clearCodes(true, true);
+              if (refusal) setNote(refusal);
+            }}
+          />
+        ) : null}
 
         {latest && latest.vehicleId === vehicle.id ? (
           <ScanReport session={latest} checks={checks} />
@@ -399,6 +411,62 @@ function RealCarTips({ mode }: { mode: AdapterMode }) {
         נקראים קודי מנוע ופליטה, מוכנות ונתונים חיים לפי תקן OBD-II. ABS, כריות אוויר ומרכב דורשים פרוטוקול יצרן
         ולא נסרקים.
       </p>
+    </Panel>
+  );
+}
+
+/** Two explicit steps before any code is cleared. The store then re-checks the car. */
+function ClearCodesPanel({ onClear }: { onClear: () => Promise<void> }) {
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+  return (
+    <Panel title="מחיקת קודי תקלה" hint="מחיקה לא מתקנת תקלה. אין צריבה ואין שינוי תוכנה ביחידות.">
+      {step === 0 ? (
+        <button
+          type="button"
+          onClick={() => setStep(1)}
+          className="min-h-11 w-full rounded-xl border border-line bg-bg-raised px-3 text-sm"
+        >
+          מחיקת קודי תקלה…
+        </button>
+      ) : null}
+      {step === 1 ? (
+        <div className="space-y-2 text-sm leading-6">
+          <p>מחיקה מכבה את נורת התקלה ומוחקת את הקודים השמורים והממתינים. היא לא מתקנת דבר.</p>
+          <p>אם התקלה אמיתית, הקוד יחזור, לפעמים כבר בנסיעה הבאה.</p>
+          <p>הסריקה הנוכחית כבר שמורה בהיסטוריה, כך שהקודים לא ילכו לאיבוד.</p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onClick={() => setStep(2)} className="min-h-11 rounded-xl bg-primary px-3 text-primary-ink">
+              הבנתי, המשך
+            </button>
+            <button type="button" onClick={() => setStep(0)} className="min-h-11 rounded-xl border border-line bg-bg-raised px-3">
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {step === 2 ? (
+        <div className="space-y-2 text-sm leading-6">
+          <p>מוכנות המערכות תתאפס. רכב שנמחקו לו קודים ממש לפני טסט עלול להיכשל בו עד שהמערכות ייבדקו מחדש.</p>
+          <p>המנוע צריך להיות כבוי וההצתה במצב ON. הרכב עומד.</p>
+          <p>קודים קבועים (Permanent) לא נמחקים ממתאם. רק הרכב מוחק אותם אחרי תיקון.</p>
+          <p>אחרי המחיקה תרוץ סריקת אימות אוטומטית.</p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setStep(0);
+                void onClear();
+              }}
+              className="min-h-11 rounded-xl bg-bad px-3 text-white"
+            >
+              מחק קודים
+            </button>
+            <button type="button" onClick={() => setStep(0)} className="min-h-11 rounded-xl border border-line bg-bg-raised px-3">
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
     </Panel>
   );
 }

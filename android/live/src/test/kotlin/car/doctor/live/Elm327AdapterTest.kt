@@ -101,7 +101,48 @@ private fun benchWith(car: FakeCar): VehicleBench {
     return bench
 }
 
+private val ENGINE_OFF_WITH_CODE = RUNNING_CAR + mapOf("010C" to "41 0C 00 00", "04" to "44")
+private val BOTH = car.doctor.core.model.ClearConfirmation(understoodCodesReturn = true, understoodReadinessReset = true)
+
 class Elm327AdapterTest {
+
+    @Test
+    fun `clearing with the engine off sends 04 once and rescans`() {
+        val car = FakeCar(ENGINE_OFF_WITH_CODE)
+        val bench = benchWith(car)
+        bench.connect()
+        bench.quickScan()
+
+        assertTrue(bench.clearCodes(BOTH) is BenchEffect.Accepted)
+        assertEquals(1, car.sent.count { it == "04" })
+        val after = bench.sessions().first()
+        assertEquals("post-clear", after.kind)
+        assertEquals(listOf("P0300"), after.clearedCodes)
+        assertEquals(2, bench.sessions().size)
+    }
+
+    @Test
+    fun `clearing is refused while the engine runs and 04 is never sent`() {
+        val car = FakeCar(RUNNING_CAR + mapOf("04" to "44"))
+        val bench = benchWith(car)
+        bench.connect()
+        bench.quickScan()
+
+        val effect = bench.clearCodes(BOTH) as BenchEffect.Rejected
+        assertTrue(effect.messageHe.contains("המנוע פועל"))
+        assertFalse(car.sent.contains("04"))
+    }
+
+    @Test
+    fun `an ECU refusal is reported and nothing is marked as cleared`() {
+        val car = FakeCar(ENGINE_OFF_WITH_CODE + mapOf("04" to "7F 04 22"))
+        val bench = benchWith(car)
+        bench.connect()
+        bench.quickScan()
+
+        assertTrue(bench.clearCodes(BOTH) is BenchEffect.Rejected)
+        assertEquals(1, bench.sessions().size)
+    }
 
     @Test
     fun `a real-car scan goes through the bench and stores a session`() {

@@ -40,7 +40,7 @@ class AdapterProtocolIntegrationTest {
         assertEquals(ObdSessionState.CONNECTED, connected.snapshot.session)
         assertEquals(ProtocolState.READY, rig.protocol.state())
         assertTrue(rig.transport.isConnected())
-        assertEquals(Obd2Profile.foundation, rig.protocol.capabilities)
+        assertEquals(Obd2Profile.withClear, rig.protocol.capabilities)
 
         rig.bench.toggleFault(FaultId.MISFIRE)
         val scanned = rig.bench.quickScan() as BenchEffect.Accepted

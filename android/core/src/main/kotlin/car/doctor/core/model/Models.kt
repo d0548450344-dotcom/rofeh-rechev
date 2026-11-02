@@ -222,4 +222,30 @@ data class DiagnosticSession(
     val labFaults: List<FaultId> = emptyList(),
     val labLostEcu: EcuId? = null,
     val errorHe: String? = null,
+    /** Codes that were cleared right before this verification scan. Empty for a normal scan. */
+    val clearedCodes: List<String> = emptyList(),
+    /** The scan whose codes were cleared. Kept so the user can always see what was there. */
+    val clearedFromSessionId: String? = null,
 )
+
+/** What clearing codes did. Clearing never repairs anything. */
+sealed class ClearOutcome {
+    data object Cleared : ClearOutcome()
+
+    /** A safety precondition was not met; nothing was sent to the car. */
+    data class Refused(val messageHe: String) : ClearOutcome()
+
+    /** The command was sent but the car did not confirm it. */
+    data class Failed(val messageHe: String) : ClearOutcome()
+}
+
+/**
+ * The user's two acknowledgements before clearing. Both must be true.
+ * Built by the UI only after the second confirmation dialog.
+ */
+data class ClearConfirmation(
+    val understoodCodesReturn: Boolean,
+    val understoodReadinessReset: Boolean,
+) {
+    val complete: Boolean get() = understoodCodesReturn && understoodReadinessReset
+}

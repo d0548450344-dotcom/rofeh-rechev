@@ -27,6 +27,13 @@ object MockEcu {
             0x01 -> currentData(scene, head)
             0x03 -> ObdFixtures.stored(scene.stored)
             0x07 -> ObdFixtures.pending(scene.pending)
+            // Mode 04: like real ECUs, refuse while the engine turns (NRC 0x22). The injected
+            // fault stays, so its code comes back on the next scan, exactly as in a real car.
+            0x04 -> if (scene.rpm > 0.0 || scene.speed > 0.0) {
+                ObdFixtures.negative(0x04, 0x22)
+            } else {
+                ObdFixtures.frame(0x44, emptyList())
+            }
             SimChannel.SERVICE -> channel(scene, head)
             else -> ObdFixtures.negative(frame.service)
         }

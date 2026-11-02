@@ -1,6 +1,7 @@
 package car.doctor.checks
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,17 +70,28 @@ class ArchitectureBoundaryTest {
         assertTrue(sources("app").any { it.isLinkLayer() && it.readText().contains("android.bluetooth") })
     }
 
+    /**
+     * The only write any module may send is OBD mode 04 (clear codes), from exactly one
+     * place, behind a consent object. Flashing, coding and security access do not exist.
+     */
     @Test
-    fun liveAdapterIsReadOnly() {
-        val sources = sources("live") + sources("protocol").filter { it.name.startsWith("Elm") }
-        assertTrue(sources.isNotEmpty())
-        for (file in sources) {
-            val text = file.readText()
-            assertFalse(file.path, text.contains("\"04\\r\""))
-        }
-        val elm = sources("protocol").single { it.name == "Elm327Protocol.kt" }.readText()
-        assertTrue(elm.contains("READ_ONLY_SERVICES"))
+    fun onlyClearCodesCanWriteAndNothingCanFlash() {
+        val protocol = sources("protocol")
+        val elm = protocol.single { it.name == "Elm327Protocol.kt" }.readText()
+        assertTrue(elm.contains("fun clearCodes(consent: ClearCodesConsent)"))
+        assertEquals(1, Regex("exchange\\(\"04\"").findAll(elm).count())
         assertFalse(elm.substringAfter("READ_ONLY_SERVICES: Set<Int> = setOf(").substringBefore(")").contains("0x04"))
+
+        val obd2 = protocol.single { it.name == "Obd2.kt" }.readText()
+        assertTrue(obd2.contains("val WRITE_AND_FLASH_SERVICES"))
+        assertTrue(obd2.contains("consent: ClearCodesConsent?"))
+
+        // No module builds a request for a write or flash service.
+        val all = listOf("core", "transport", "protocol", "simulation", "live", "data", "app").flatMap(::sources)
+        val flashRequest = Regex("ProtocolRequest\\(\\s*0x(10|11|14|27|28|2E|2F|31|34|35|36|37|3B|3D|85)\\b", RegexOption.IGNORE_CASE)
+        for (file in all) {
+            assertFalse(file.path, flashRequest.containsMatchIn(file.readText()))
+        }
     }
 
     @Test
