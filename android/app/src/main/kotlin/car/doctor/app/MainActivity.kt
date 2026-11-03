@@ -1,7 +1,10 @@
 package car.doctor.app
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.ViewModelProvider
@@ -35,6 +38,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Draw behind the system bars (dark icons off); the UI pads itself with window insets,
+        // including the keyboard, so fields and buttons stay reachable while typing.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
         val vm = ViewModelProvider(this, factory())[DoctorViewModel::class.java]
         vm.permissionAsker = PermissionAsker { permissions, result ->
