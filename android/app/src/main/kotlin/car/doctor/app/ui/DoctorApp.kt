@@ -630,9 +630,9 @@ private fun ClearDialogs(vm: DoctorViewModel) {
             title = { Text("מחיקה לא מתקנת תקלה") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("מחיקה מכבה את נורת התקלה ומוחקת את הקודים השמורים והממתינים. היא לא מתקנת דבר.", lineHeight = 20.sp)
-                    Text("אם התקלה אמיתית, הקוד יחזור, לפעמים כבר בנסיעה הבאה.", lineHeight = 20.sp)
-                    Text("הסריקה הנוכחית כבר שמורה בהיסטוריה, כך שהקודים לא ילכו לאיבוד.", lineHeight = 20.sp)
+                    Text("מחיקה מכבה את נורת התקלה ומוחקת את הקודים השמורים והממתינים. היא לא מתקנת דבר.")
+                    Text("אם התקלה אמיתית, הקוד יחזור, לפעמים כבר בנסיעה הבאה.")
+                    Text("הסריקה הנוכחית כבר שמורה בהיסטוריה, כך שהקודים לא ילכו לאיבוד.")
                 }
             },
             confirmButton = { TextButton(onClick = { vm.clearNext() }) { Text("הבנתי, המשך") } },
@@ -643,10 +643,10 @@ private fun ClearDialogs(vm: DoctorViewModel) {
             title = { Text("לפני שמוחקים") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("מוכנות המערכות תתאפס. רכב שנמחקו לו קודים ממש לפני טסט עלול להיכשל בו עד שהמערכות ייבדקו מחדש, בדרך כלל אחרי כמה נסיעות.", lineHeight = 20.sp)
-                    Text("המנוע צריך להיות כבוי וההצתה במצב ON. הרכב עומד.", lineHeight = 20.sp)
-                    Text("קודים קבועים (Permanent) לא נמחקים ממתאם. רק הרכב מוחק אותם אחרי תיקון.", lineHeight = 20.sp)
-                    Text("אחרי המחיקה תרוץ סריקת אימות אוטומטית.", lineHeight = 20.sp)
+                    Text("מוכנות המערכות תתאפס. רכב שנמחקו לו קודים ממש לפני טסט עלול להיכשל בו עד שהמערכות ייבדקו מחדש, בדרך כלל אחרי כמה נסיעות.")
+                    Text("המנוע צריך להיות כבוי וההצתה במצב ON. הרכב עומד.")
+                    Text("קודים קבועים (Permanent) לא נמחקים ממתאם. רק הרכב מוחק אותם אחרי תיקון.")
+                    Text("אחרי המחיקה תרוץ סריקת אימות אוטומטית.")
                 }
             },
             confirmButton = { TextButton(onClick = { vm.confirmClear() }) { Text("מחק קודים") } },
