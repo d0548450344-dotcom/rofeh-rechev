@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    "Car doctor": a dashboard gauge (the car) read by a heartbeat trace (the doctor).
+    Everything sits inside the adaptive-icon safe zone (a 66dp circle at the centre).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Gauge dial, 240 degrees. -->
+    <path
+        android:pathData="M32.35,70.5A25,25 0,1 1,75.65 70.5"
+        android:strokeColor="#FFECEEF1"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+    <!-- Ticks. -->
+    <path
+        android:pathData="M54,37.2V41.2M39.2,43.2L42,46M68.8,43.2L66,46"
+        android:strokeColor="#FF8A9099"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+    <!-- Heartbeat trace in copper. -->
+    <path
+        android:pathData="M27,62H40.5L44.5,54L49.5,70L54.5,44L59,66L62,59.5H81"
+        android:strokeColor="#FFD9773A"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

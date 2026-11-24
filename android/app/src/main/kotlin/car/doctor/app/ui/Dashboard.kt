@@ -168,7 +168,7 @@ private fun Readout(label: String, sample: SampleLine?, fallbackUnit: String, mo
 
 /**
  * An analog dial: 270° sweep, minor and major ticks, a red zone at the top of the scale,
- * an orange needle and the value in condensed digits under the hub.
+ * a copper needle and the value in condensed digits under the hub.
  * Drawn left-to-right like a real dial; it does not mirror in RTL.
  */
 @Composable

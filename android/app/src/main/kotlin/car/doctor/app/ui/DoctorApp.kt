@@ -103,7 +103,7 @@ fun DoctorApp(vm: DoctorViewModel) {
 /**
  * Five destinations, always visible, equal width, in RTL order (בית on the right).
  * A solid strip like the bottom of a dashboard: the active item is ice-white with a short
- * lit orange bar above it; the others are dimmed.
+ * copper bar above it; the others are dimmed.
  */
 @Composable
 private fun NavBar(vm: DoctorViewModel) {

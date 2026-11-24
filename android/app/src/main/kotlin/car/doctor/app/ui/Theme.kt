@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.sp
 
 /*
  * Design tokens: a garage diagnostic tool with the finish of a new car's instrument cluster.
- * Graphite in a few depth steps, ice-white type, and one ignition-orange accent used sparingly
+ * Graphite in a few depth steps, ice-white type, and one burnt-copper accent used sparingly
  * (needle, red zone, primary action, active tab). Amber is reserved for warning lamps and codes.
  */
 internal object Tone {
@@ -70,11 +70,11 @@ internal object Tone {
     val MetalBottom = Color(0xFF17191C)
     val Line = Color(0xFF2A2D33)       // resting borders, dial track
     val LineStrong = Color(0xFF444851) // borders around a filled value or an enabled control
-    val Accent = Color(0xFFFF6A1A)     // ignition orange
-    val AccentDeep = Color(0xFFF05A0E)
+    val Accent = Color(0xFFD9773A)     // burnt copper: warm, not neon
+    val AccentDeep = Color(0xFFC0652C)
     val AccentInk = Color(0xFF170903)
-    val AccentText = Color(0xFFFF8A4A) // orange text on graphite (contrast-safe)
-    val AccentTint = Color(0x1AFF6A1A) // selected states, ~10% orange
+    val AccentText = Color(0xFFE8955E) // copper text on graphite (contrast-safe)
+    val AccentTint = Color(0x1FD9773A) // selected states, ~12% copper
     val Amber = Color(0xFFFFB020)      // warning lamp, fault codes
     val AmberTint = Color(0x1AFFB020)
     val Go = Color(0xFF3CCB8C)         // completed / connected lamps
@@ -150,7 +150,7 @@ internal val ControlHeight = 50.dp
 
 internal val MetalBrush = Brush.verticalGradient(listOf(Tone.MetalTop, Tone.MetalBottom))
 internal val PanelBrush = Brush.linearGradient(listOf(Color(0xFF1E2024), Tone.Raised, Color(0xFF111214)))
-internal val AccentBrush = Brush.verticalGradient(listOf(Color(0xFFFF7A2E), Tone.AccentDeep))
+internal val AccentBrush = Brush.verticalGradient(listOf(Color(0xFFE0844A), Tone.AccentDeep))
 
 @Composable
 fun DoctorTheme(content: @Composable () -> Unit) {
@@ -245,7 +245,7 @@ fun StatusLamp(text: String, on: Boolean) {
     }
 }
 
-/** The main action of a screen or panel: ignition orange. */
+/** The main action of a screen or panel: copper. */
 @Composable
 fun PrimaryAction(
     label: String,
@@ -272,7 +272,7 @@ fun PrimaryAction(
 
 /**
  * A secondary action, or one option of a set. Not selected: a quiet graphite button.
- * Selected: orange tint, orange border and a check mark.
+ * Selected: copper tint, copper border and a check mark.
  */
 @Composable
 fun QuietAction(
@@ -398,7 +398,7 @@ private fun ButtonLabel(label: String) {
 
 /**
  * One choice among a few short options in one row, like a drive-mode selector
- * (radio semantics). The selected segment is raised metal with an orange mark.
+ * (radio semantics). The selected segment is raised metal with a copper mark.
  */
 @Composable
 fun <T> Segmented(
