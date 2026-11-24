@@ -1,6 +1,12 @@
 package car.doctor.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -43,7 +51,9 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import car.doctor.core.catalog.DtcSystem
 import car.doctor.core.catalog.EcuCatalog
+import car.doctor.core.catalog.dtcSystem
 import car.doctor.core.catalog.GAP_BADGE_HE
 import car.doctor.core.catalog.ecuAccessLabel
 import car.doctor.core.catalog.monitorLabel
@@ -206,20 +216,7 @@ private fun Gauge(
                 val redStart = angleOf(redFrom)
                 drawArc(Tone.Accent, redStart, 405f - redStart, false, arcTopLeft, arcSize, style = Stroke(track))
 
-                val minorCount = ((span / majorEvery) * 5).toInt()
-                for (i in 0..minorCount) {
-                    val deg = 135f + 270f * i / minorCount
-                    val major = i % 5 == 0
-                    val inner = radius - track / 2f - (if (major) 10.dp.toPx() else 5.dp.toPx())
-                    val outer = radius - track / 2f - 2.dp.toPx()
-                    drawLine(
-                        color = if (major) Tone.Paper else Color(0xFF5E646D),
-                        start = point(deg, inner),
-                        end = point(deg, outer),
-                        strokeWidth = if (major) 2.dp.toPx() else 1.dp.toPx(),
-                        cap = StrokeCap.Round,
-                    )
-                }
+                dialTicks(center, radius, track, ((span / majorEvery) * 5).toInt())
 
                 val needleAngle = if (value == null) 135f else angleOf(value)
                 drawLine(
@@ -256,19 +253,11 @@ private enum class Lamp { ON, CLEAR, OUT, ERROR }
 
 private class LampState(val lamp: Lamp, val caption: String)
 
-/**
- * Transmission codes by the SAE J2012 / ISO 15031-6 numbering: P07xx, P08xx and P09xx.
- * Over generic OBD-II they arrive through the powertrain (engine) unit, so they are split
- * out of the engine lamp by their number, not by which unit sent them.
- */
-private fun isTransmissionCode(code: String): Boolean {
-    val c = code.trim().uppercase()
-    return c.length == 5 && c[0] == 'P' && c[1] == '0' && c[2] in '7'..'9'
-}
+private fun ecuOf(nameHe: String): EcuId? = EcuId.entries.firstOrNull { EcuCatalog.get(it).nameHe == nameHe }
 
 private fun countLabel(codes: Int) = if (codes == 1) "קוד אחד" else "$codes קודים"
 
-/** Lamp for a unit that answered or not, when it returned no codes of its own. */
+/** Lamp for a group with no codes of its own: dark if its unit answered, dimmed if not read. */
 private fun accessLamp(name: String, session: SessionView, clearCaption: String): LampState {
     val line = session.ecus.firstOrNull { it.nameHe == name } ?: return LampState(Lamp.OUT, GAP_BADGE_HE)
     return when (line.badgeHe) {
@@ -279,35 +268,45 @@ private fun accessLamp(name: String, session: SessionView, clearCaption: String)
 }
 
 /**
- * The lamp for one unit, taken only from what the session holds: lit when that unit
- * returned codes, dark when it was checked and returned none, dimmed when it was not read.
- * The engine lamp leaves out transmission-range codes; the gearbox lamp shows them.
+ * The lamp for one group, taken only from what the session holds: lit when codes of that
+ * group came back, dark when the unit that would report them answered with none, dimmed
+ * when it was not read. Each code lights exactly one lamp (see [dtcSystem]).
  */
-private fun lampFor(id: EcuId, session: SessionView): LampState {
-    val name = EcuCatalog.get(id).nameHe
-    val codes = session.codes.count { it.ecuHe == name && !(id == EcuId.ENGINE && isTransmissionCode(it.code)) }
+private fun lampFor(system: DtcSystem, session: SessionView): LampState {
+    val codes = session.codes.count { line -> ecuOf(line.ecuHe)?.let { dtcSystem(line.code, it) } == system }
     if (codes > 0) return LampState(Lamp.ON, countLabel(codes))
-    return accessLamp(name, session, "ללא קודים")
+    val unit = when (system) {
+        DtcSystem.ABS -> EcuId.ABS
+        DtcSystem.AIRBAGS -> EcuId.SRS
+        else -> EcuId.ENGINE
+    }
+    // The gearbox unit itself is not scanned: only the transmission codes the powertrain reports.
+    val clear = if (system == DtcSystem.TRANSMISSION) "ללא קודים (OBD בלבד)" else "ללא קודים"
+    return accessLamp(EcuCatalog.get(unit).nameHe, session, clear)
 }
 
-/**
- * Gearbox lamp. Generic OBD-II reads only the transmission codes the powertrain reports
- * (P07xx–P09xx); the gearbox unit itself is not scanned. So "no codes" says so: OBD only.
- */
-private fun gearboxLamp(session: SessionView): LampState {
-    val codes = session.codes.count { isTransmissionCode(it.code) }
-    if (codes > 0) return LampState(Lamp.ON, countLabel(codes))
-    return accessLamp(EcuCatalog.get(EcuId.ENGINE).nameHe, session, "ללא קודים (OBD בלבד)")
-}
+private class LampSpec(val name: String, val icon: ImageVector, val system: DtcSystem)
 
-/** A row of dashboard tell-tales: engine, gearbox, brakes (ABS), airbags. */
+private val LAMPS = listOf(
+    LampSpec("מנוע", DoctorIcons.Engine, DtcSystem.ENGINE),
+    LampSpec("גיר", DoctorIcons.Gearbox, DtcSystem.TRANSMISSION),
+    LampSpec("חיישנים", DoctorIcons.Sensor, DtcSystem.SENSORS),
+    LampSpec("חשמל", DoctorIcons.Battery, DtcSystem.ELECTRICAL),
+    LampSpec("ABS", DoctorIcons.Brake, DtcSystem.ABS),
+    LampSpec("כריות", DoctorIcons.Airbag, DtcSystem.AIRBAGS),
+)
+
+/** Dashboard tell-tales in two rows of three: engine, gearbox, sensors, electrical, ABS, airbags. */
 @Composable
 fun WarningLamps(session: SessionView) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        LampTile("מנוע", DoctorIcons.Engine, lampFor(EcuId.ENGINE, session), Modifier.weight(1f))
-        LampTile("גיר", DoctorIcons.Gearbox, gearboxLamp(session), Modifier.weight(1f))
-        LampTile("ABS", DoctorIcons.Brake, lampFor(EcuId.ABS, session), Modifier.weight(1f))
-        LampTile("כריות", DoctorIcons.Airbag, lampFor(EcuId.SRS, session), Modifier.weight(1f))
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LAMPS.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { spec ->
+                    LampTile(spec.name, spec.icon, lampFor(spec.system, session), Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 
@@ -398,6 +397,84 @@ fun ReadinessList(monitors: List<MonitorLine>) {
                 )
             }
             if (index < monitors.lastIndex) HorizontalDivider(thickness = 1.dp, color = Color(0xFF1E2024))
+        }
+    }
+}
+
+private fun dialPoint(center: Offset, deg: Float, r: Float): Offset {
+    val rad = deg * PI.toFloat() / 180f
+    return Offset(center.x + r * cos(rad), center.y + r * sin(rad))
+}
+
+/**
+ * Minor and major ticks on a 270° dial (a major tick every fifth). Ticks up to [litUpTo]
+ * (a 0..1 fraction of the sweep) are drawn in copper, like a lit tachometer scale.
+ */
+private fun DrawScope.dialTicks(center: Offset, radius: Float, track: Float, minorCount: Int, litUpTo: Float = -1f) {
+    for (i in 0..minorCount) {
+        val f = i.toFloat() / minorCount
+        val deg = 135f + 270f * f
+        val major = i % 5 == 0
+        val inner = radius - track / 2f - (if (major) 10.dp.toPx() else 5.dp.toPx())
+        val outer = radius - track / 2f - 2.dp.toPx()
+        val color = when {
+            f <= litUpTo -> Tone.Accent
+            major -> Tone.Paper
+            else -> Color(0xFF5E646D)
+        }
+        drawLine(
+            color = color,
+            start = dialPoint(center, deg, inner),
+            end = dialPoint(center, deg, outer),
+            strokeWidth = if (major) 2.dp.toPx() else 1.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+/**
+ * Work in progress (connecting, scanning, clearing and verifying): a dial whose needle sweeps
+ * up and down like an engine being revved, with the scale lighting behind it, and the current
+ * step under it. It shows activity, not a percentage: the adapter does not report one.
+ */
+@Composable
+fun ScanProgress(text: String) {
+    ClusterPanel {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .clearAndSetSemantics { contentDescription = text },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val sweep = rememberInfiniteTransition(label = "rev")
+            val f by sweep.animateFloat(
+                initialValue = 0.06f,
+                targetValue = 0.94f,
+                animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "needle",
+            )
+            Canvas(Modifier.size(width = 150.dp, height = 120.dp)) {
+                val track = 7.dp.toPx()
+                val radius = size.width / 2f - track
+                val center = Offset(size.width / 2f, radius + track)
+                val arcSize = Size(radius * 2, radius * 2)
+                val topLeft = Offset(center.x - radius, center.y - radius)
+                drawArc(Tone.Line, 135f, 270f, false, topLeft, arcSize, style = Stroke(track))
+                drawArc(Tone.Accent, 135f, 270f * f, false, topLeft, arcSize, style = Stroke(track, cap = StrokeCap.Round))
+                dialTicks(center, radius, track, 30, litUpTo = f)
+                drawLine(
+                    color = Tone.Accent,
+                    start = center,
+                    end = dialPoint(center, 135f + 270f * f, radius - 18.dp.toPx()),
+                    strokeWidth = 3.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                drawCircle(Color(0xFF3A3E45), radius = 7.dp.toPx(), center = center)
+                drawCircle(Color(0xFF1E2024), radius = 5.5.dp.toPx(), center = center)
+            }
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = Tone.Paper, textAlign = TextAlign.Center)
         }
     }
 }

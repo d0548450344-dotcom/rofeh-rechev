@@ -27,7 +27,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +34,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,6 +76,7 @@ fun DoctorApp(vm: DoctorViewModel) {
     val ui = vm.ui
     // Edge to edge: the page respects the status bar, cutouts and the keyboard; the nav bar
     // paints under the system navigation area and pads its own content above it.
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -98,6 +102,10 @@ fun DoctorApp(vm: DoctorViewModel) {
         NavBar(vm)
     }
     ClearDialogs(vm)
+    // Plays once per launch (kept across rotation), over everything, then gets out of the way.
+    var intro by rememberSaveable { mutableStateOf(true) }
+    if (intro) LaunchIntro { intro = false }
+    }
 }
 
 /**
@@ -333,7 +341,7 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
         }
     }
     AdapterPanel(ui, vm)
-    ui.busyHe?.let { Busy(it) }
+    ui.busyHe?.let { ScanProgress(it) }
     ui.noticeHe?.let { Banner(it) }
     ui.errorHe?.let { Banner(it) }
     PairRow(
@@ -672,25 +680,6 @@ private fun LiveTips() {
             Text("2. מעבירים הצתה למצב ON או מתניעים. במצב כבוי הרכב לא עונה.", style = MaterialTheme.typography.bodyMedium)
             Text("3. לוחצים ״התחבר״ ואז ״סריקה מהירה״. החיבור הראשון יכול לקחת עד 15 שניות.", style = MaterialTheme.typography.bodyMedium)
             Note("נקראים קודי מנוע ופליטה לפי תקן OBD-II. ABS, כריות אוויר ומרכב דורשים פרוטוקול יצרן ולא נסרקים.")
-        }
-    }
-}
-
-@Composable
-private fun Busy(text: String) {
-    Panel {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = Tone.Accent,
-                trackColor = Tone.Line,
-            )
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = Tone.Paper)
         }
     }
 }

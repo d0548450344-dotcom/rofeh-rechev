@@ -89,6 +89,24 @@ internal object DoctorIcons {
         width = 1.7f,
     )
 
+    /** Electrical: a battery. */
+    val Battery = line(
+        "battery",
+        "M4 8h16v11H4z",
+        "M7 8V6h3v2M14 8V6h3v2",
+        "M7 13.5h3M15.5 12v3M14 13.5h3",
+        width = 1.7f,
+    )
+
+    /** Sensors: a probe point with its signal. */
+    val Sensor = line(
+        "sensor",
+        "M12 10.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
+        "M8.8 8.8a4.5 4.5 0 0 0 0 6.4M15.2 8.8a4.5 4.5 0 0 1 0 6.4",
+        "M6 6a8.5 8.5 0 0 0 0 12M18 6a8.5 8.5 0 0 1 0 12",
+        width = 1.7f,
+    )
+
     /** Brake system (ABS lamp): a disc inside brackets. */
     val Brake = line(
         "brake",
