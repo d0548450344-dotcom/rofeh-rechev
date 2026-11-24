@@ -57,7 +57,8 @@ import kotlin.math.sin
  * every tick it passes, drops back to idle with a small overshoot, then the ECG trace is
  * written across with a bright head and the app name fades in. 2.2 s, then a short fade.
  * A tap skips it; it is skipped when the system turns animations off.
- * Geometry is in a 200-unit box, like the approved web prototype.
+ * Geometry is in a 200-unit box, like the approved web prototype. The last frame is the
+ * launcher icon (res/drawable/ic_launcher_foreground.xml), so opening the app continues it.
  */
 
 private object Carbon {
@@ -66,7 +67,8 @@ private object Carbon {
     val FaceTop = Color(0xFF1C1C20)
     val FaceBottom = Color(0xFF09090B)
     val Rim = Color(0x24ECEEF1)
-    val TickOff = Color(0xFF2C2C31)
+    val TickOff = Color(0xFF4A4A52)
+    val RedOff = Color(0xFF8A3A2C)
     val TickOn = Color(0xFFECEEF1)
     val Red = Color(0xFFD04A35)
     val Needle = Color(0xFFD9553A)
@@ -276,9 +278,10 @@ private fun DrawScope.tachIcon(f: Frame) {
         val on = f.needle - a >= -3f
         drawLine(
             color = when {
-                !on -> Carbon.TickOff
-                red -> Carbon.Red
-                else -> Carbon.TickOn
+                on && red -> Carbon.Red
+                on -> Carbon.TickOn
+                red -> Carbon.RedOff
+                else -> Carbon.TickOff
             },
             start = dial(a, if (major) 68f else 73f),
             end = dial(a, 82f),
