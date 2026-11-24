@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    "Car doctor": a speedometer scale (the car) over an ECG trace (the doctor).
+    Fine lines, like a printed dial. Everything sits inside the adaptive-icon safe zone
+    (a 66dp circle at the centre).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dial rim, a half circle. -->
+    <path
+        android:pathData="M27,58A27,27 0,0 1,81 58"
+        android:strokeColor="#FFECEEF1"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <!-- Scale: 13 ticks every 15 degrees, every third one longer. -->
+    <path
+        android:pathData="M34.50,58.00L30.50,58.00M33.72,52.56L31.30,51.92M35.81,47.50L33.65,46.25M40.21,44.21L37.38,41.38M43.50,39.81L42.25,37.65M48.56,37.72L47.92,35.30M54.00,38.50L54.00,34.50M59.44,37.72L60.08,35.30M64.50,39.81L65.75,37.65M67.79,44.21L70.62,41.38M72.19,47.50L74.35,46.25M74.28,52.56L76.70,51.92M73.50,58.00L77.50,58.00"
+        android:strokeColor="#FFECEEF1"
+        android:strokeWidth="1.1"
+        android:strokeLineCap="round" />
+    <!-- ECG trace: P wave, QRS spike, T wave. -->
+    <path
+        android:pathData="M27,64H38.5L41.5,60.5L44.5,64H47.5L51,49L55.5,75L59.5,58.5L62,64H81"
+        android:strokeColor="#FFE67A2E"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
