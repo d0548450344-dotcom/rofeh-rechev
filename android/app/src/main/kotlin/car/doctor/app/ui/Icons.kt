@@ -77,12 +77,15 @@ internal object DoctorIcons {
         width = 1.7f,
     )
 
-    /** Body control: a car outline. */
-    val Car = line(
-        "car",
-        "M4 16v-3.5L6.2 8h11.6l2.2 4.5V16z",
-        "M4 12.5h16",
-        "M6 16v2M18 16v2",
+    /** Gearbox: an H-pattern shift gate. */
+    val Gearbox = line(
+        "gearbox",
+        "M6 6.5v11M12 6.5v11M18 6.5v5.5M6 12h12",
+        "M6 3.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
+        "M12 3.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
+        "M18 3.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
+        "M6 17.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
+        "M12 17.5a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0-3z",
         width = 1.7f,
     )
 

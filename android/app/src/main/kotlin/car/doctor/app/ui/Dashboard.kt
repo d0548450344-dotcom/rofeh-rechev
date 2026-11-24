@@ -257,29 +257,57 @@ private enum class Lamp { ON, CLEAR, OUT, ERROR }
 private class LampState(val lamp: Lamp, val caption: String)
 
 /**
- * The lamp for one unit, taken only from what the session holds: lit when that unit
- * returned codes, dark when it was checked and returned none, dashed when it was not read.
+ * Transmission codes by the SAE J2012 / ISO 15031-6 numbering: P07xx, P08xx and P09xx.
+ * Over generic OBD-II they arrive through the powertrain (engine) unit, so they are split
+ * out of the engine lamp by their number, not by which unit sent them.
  */
-private fun lampFor(id: EcuId, session: SessionView): LampState {
-    val name = EcuCatalog.get(id).nameHe
-    val codes = session.codes.count { it.ecuHe == name }
-    if (codes > 0) return LampState(Lamp.ON, if (codes == 1) "קוד אחד" else "$codes קודים")
+private fun isTransmissionCode(code: String): Boolean {
+    val c = code.trim().uppercase()
+    return c.length == 5 && c[0] == 'P' && c[1] == '0' && c[2] in '7'..'9'
+}
+
+private fun countLabel(codes: Int) = if (codes == 1) "קוד אחד" else "$codes קודים"
+
+/** Lamp for a unit that answered or not, when it returned no codes of its own. */
+private fun accessLamp(name: String, session: SessionView, clearCaption: String): LampState {
     val line = session.ecus.firstOrNull { it.nameHe == name } ?: return LampState(Lamp.OUT, GAP_BADGE_HE)
     return when (line.badgeHe) {
-        ecuAccessLabel(EcuAccess.CHECKED) -> LampState(Lamp.CLEAR, "ללא קודים")
+        ecuAccessLabel(EcuAccess.CHECKED) -> LampState(Lamp.CLEAR, clearCaption)
         ecuAccessLabel(EcuAccess.COMM_ERROR) -> LampState(Lamp.ERROR, line.badgeHe)
         else -> LampState(Lamp.OUT, line.badgeHe)
     }
 }
 
-/** A row of dashboard tell-tales: engine, brakes (ABS), airbags, body. */
+/**
+ * The lamp for one unit, taken only from what the session holds: lit when that unit
+ * returned codes, dark when it was checked and returned none, dimmed when it was not read.
+ * The engine lamp leaves out transmission-range codes; the gearbox lamp shows them.
+ */
+private fun lampFor(id: EcuId, session: SessionView): LampState {
+    val name = EcuCatalog.get(id).nameHe
+    val codes = session.codes.count { it.ecuHe == name && !(id == EcuId.ENGINE && isTransmissionCode(it.code)) }
+    if (codes > 0) return LampState(Lamp.ON, countLabel(codes))
+    return accessLamp(name, session, "ללא קודים")
+}
+
+/**
+ * Gearbox lamp. Generic OBD-II reads only the transmission codes the powertrain reports
+ * (P07xx–P09xx); the gearbox unit itself is not scanned. So "no codes" says so: OBD only.
+ */
+private fun gearboxLamp(session: SessionView): LampState {
+    val codes = session.codes.count { isTransmissionCode(it.code) }
+    if (codes > 0) return LampState(Lamp.ON, countLabel(codes))
+    return accessLamp(EcuCatalog.get(EcuId.ENGINE).nameHe, session, "ללא קודים (OBD בלבד)")
+}
+
+/** A row of dashboard tell-tales: engine, gearbox, brakes (ABS), airbags. */
 @Composable
 fun WarningLamps(session: SessionView) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         LampTile("מנוע", DoctorIcons.Engine, lampFor(EcuId.ENGINE, session), Modifier.weight(1f))
+        LampTile("גיר", DoctorIcons.Gearbox, gearboxLamp(session), Modifier.weight(1f))
         LampTile("ABS", DoctorIcons.Brake, lampFor(EcuId.ABS, session), Modifier.weight(1f))
         LampTile("כריות", DoctorIcons.Airbag, lampFor(EcuId.SRS, session), Modifier.weight(1f))
-        LampTile("מרכב", DoctorIcons.Car, lampFor(EcuId.BCM, session), Modifier.weight(1f))
     }
 }
 
