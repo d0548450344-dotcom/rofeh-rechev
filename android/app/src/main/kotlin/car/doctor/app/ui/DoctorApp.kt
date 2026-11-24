@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +38,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +48,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
@@ -64,7 +65,6 @@ import car.doctor.core.model.Fuel
 import car.doctor.core.model.Posture
 import car.doctor.core.present.CodeLine
 import car.doctor.core.present.FindingView
-import car.doctor.core.present.MonitorLine
 import car.doctor.core.present.SampleLine
 import car.doctor.core.present.SessionView
 
@@ -76,7 +76,7 @@ fun DoctorApp(vm: DoctorViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Brush.verticalGradient(0f to Tone.BaseTop, 0.4f to Tone.Base, 1f to Color(0xFF0A0A0C)))
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             .imePadding(),
     ) {
@@ -102,27 +102,30 @@ fun DoctorApp(vm: DoctorViewModel) {
 
 /**
  * Five destinations, always visible, equal width, in RTL order (בית on the right).
- * Icon above a short one-line label; the active one gets a brass pill and brass text.
+ * A solid strip like the bottom of a dashboard: the active item is ice-white with a short
+ * lit orange bar above it; the others are dimmed.
  */
 @Composable
 private fun NavBar(vm: DoctorViewModel) {
-    Surface(color = Tone.High, modifier = Modifier.fillMaxWidth()) {
-        Column {
-            HorizontalDivider(thickness = 1.dp, color = Tone.Line)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                    .selectableGroup(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NavItem("בית", DoctorIcons.Home, vm.screen == DoctorScreen.HOME) { vm.showHome() }
-                NavItem("ספסל", DoctorIcons.Gauge, vm.screen == DoctorScreen.BENCH) { vm.showBench() }
-                NavItem("תוצאה", DoctorIcons.Report, vm.screen == DoctorScreen.RESULT) { vm.showResult() }
-                NavItem("היסטוריה", DoctorIcons.History, vm.screen == DoctorScreen.HISTORY) { vm.showHistory() }
-                NavItem("הגדרות", DoctorIcons.Settings, vm.screen == DoctorScreen.SETTINGS) { vm.showSettings() }
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color(0xFF141518), Color(0xFF0E0F11)))),
+    ) {
+        HorizontalDivider(thickness = 1.dp, color = Color(0xFF24272C))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                .padding(horizontal = 4.dp)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavItem("בית", DoctorIcons.Home, vm.screen == DoctorScreen.HOME) { vm.showHome() }
+            NavItem("ספסל", DoctorIcons.Gauge, vm.screen == DoctorScreen.BENCH) { vm.showBench() }
+            NavItem("תוצאה", DoctorIcons.Report, vm.screen == DoctorScreen.RESULT) { vm.showResult() }
+            NavItem("היסטוריה", DoctorIcons.History, vm.screen == DoctorScreen.HISTORY) { vm.showHistory() }
+            NavItem("הגדרות", DoctorIcons.Settings, vm.screen == DoctorScreen.SETTINGS) { vm.showSettings() }
         }
     }
 }
@@ -134,72 +137,79 @@ private fun RowScope.NavItem(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val tint = if (selected) Tone.Brass else Tone.Muted
-    Column(
+    val tint = if (selected) Tone.Paper else Color(0xFF7C828B)
+    Box(
         modifier = Modifier
             .weight(1f)
-            .heightIn(min = 56.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .heightIn(min = 64.dp)
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 56.dp)
-                .fillMaxWidth()
-                .height(30.dp)
-                .clip(RoundedCornerShape(15.dp))
-                .background(if (selected) Tone.BrassTint else Color.Transparent),
-            contentAlignment = Alignment.Center,
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .size(width = 28.dp, height = 3.dp)
+                    .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
+                    .background(Tone.Accent),
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
         ) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.height(4.dp))
-        // Labels follow the system font size up to 1.3x; past that the five items no
-        // longer fit one line on a small phone, and a wrapped label breaks the bar.
-        val density = LocalDensity.current
-        CompositionLocalProvider(
-            LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.3f)),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (selected) Tone.Brass else Tone.Muted,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
+            // Labels follow the system font size up to 1.3x; past that the five items no
+            // longer fit one line on a small phone, and a wrapped label breaks the bar.
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.3f)),
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = tint,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
-    PageTitle(
-        "רופא רכב",
-        "קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. מחיקת קודים עם הגנות; אין צריבה.",
-    )
+    BrandBar(ui)
     ui.storageNoticeHe?.let { Banner(it) }
     ui.noticeHe?.let { Banner(it) }
 
-    Panel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SectionLabel("הרכבים במוסך")
-            if (ui.vehicles.isEmpty()) {
-                Text(
-                    "אין עדיין פרופיל. הוסיפו רכב, ואז עברו לספסל כדי לבחור מתאם ולהריץ סריקה.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Tone.Muted,
-                )
-            }
-            ui.vehicles.forEach { vehicle ->
-                SelectableCard(vehicle.titleHe, vehicle.metaHe, selected = vehicle.selected) {
-                    vm.selectVehicle(vehicle.id)
-                }
+    if (ui.hasVehicle) {
+        VehicleHero(ui)
+        PrimaryAction("לספסל הסריקה", enabled = true) { vm.showBench() }
+    } else {
+        Text(
+            "קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. מחיקת קודים עם הגנות; אין צריבה.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Tone.Muted,
+        )
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel("המוסך")
+        if (ui.vehicles.isEmpty()) {
+            Text(
+                "אין עדיין פרופיל. הוסיפו רכב, ואז עברו לספסל כדי לבחור מתאם ולהריץ סריקה.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Tone.Muted,
+            )
+        }
+        ui.vehicles.forEach { vehicle ->
+            SelectableCard(vehicle.titleHe, vehicle.metaHe, selected = vehicle.selected) {
+                vm.selectVehicle(vehicle.id)
             }
         }
     }
@@ -208,22 +218,25 @@ private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionLabel("פרופיל חדש")
             Field("כינוי", vm.nickname) { vm.nickname = it }
-            Field("יצרן", vm.make) { vm.make = it }
-            Field("דגם", vm.model) { vm.model = it }
-            Field("שנת ייצור", vm.yearText, number = true, ltr = true) { vm.yearText = it }
-            Field(
-                "VIN",
-                vm.vin,
-                mono = true,
-                capitalizeAll = true,
-                supporting = "לא חובה · מוקלד ידנית, לא מאומת מול הרכב",
-            ) { vm.vin = it }
+            PairRow(
+                left = { Field("יצרן", vm.make) { vm.make = it } },
+                right = { Field("דגם", vm.model) { vm.model = it } },
+            )
+            PairRow(
+                left = { Field("שנת ייצור", vm.yearText, number = true, ltr = true) { vm.yearText = it } },
+                right = {
+                    Field("VIN", vm.vin, mono = true, capitalizeAll = true, supporting = "לא חובה · לא מאומת") {
+                        vm.vin = it
+                    }
+                },
+            )
             FieldCaption("סוג דלק")
-            ChoiceGrid(
+            Segmented(
                 options = Fuel.entries,
                 selected = vm.fuel,
                 label = { fuelLabel(it) },
-            ) { vm.chooseFuel(it) }
+                onSelect = { vm.chooseFuel(it) },
+            )
             Spacer(Modifier.height(4.dp))
             PrimaryAction("שמור רכב", enabled = true) { vm.createVehicle() }
             QuietAction("הוסף קורולה לדוגמה", enabled = true, selected = false) { vm.addDemo() }
@@ -231,19 +244,87 @@ private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
     }
 }
 
+/** App mark and the adapter's readiness, like the top line of a cluster. */
+@Composable
+private fun BrandBar(ui: DoctorUi) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(DoctorIcons.Gauge, contentDescription = null, tint = Tone.AccentText, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.width(10.dp))
+        Text("רופא רכב", style = MaterialTheme.typography.titleMedium, color = Tone.Paper, modifier = Modifier.weight(1f))
+        StatusLamp(ui.sourceLabelHe, on = ui.canDisconnect)
+    }
+}
+
+/** The selected car, presented like the spec plate on a cluster, with its last scan. */
+@Composable
+private fun VehicleHero(ui: DoctorUi) {
+    ClusterPanel {
+        Column {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("הרכב הנבחר", style = MaterialTheme.typography.labelMedium, color = Tone.Muted)
+                Text(ui.nickname, style = MaterialTheme.typography.headlineLarge, color = Tone.Paper)
+                Text(ui.metaHe, style = MaterialTheme.typography.bodyMedium, color = Tone.Soft)
+            }
+            HorizontalDivider(thickness = 1.dp, color = Tone.Line)
+            val latest = ui.latest
+            val codes = latest?.codes?.size ?: 0
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x2E000000))
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    DoctorIcons.Engine,
+                    contentDescription = null,
+                    tint = if (codes > 0) Tone.Amber else Tone.Dim,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    when {
+                        latest == null -> "עדיין לא נסרק"
+                        codes == 0 -> "סריקה אחרונה · ללא קודים"
+                        codes == 1 -> "סריקה אחרונה · קוד אחד"
+                        else -> "סריקה אחרונה · $codes קודים"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Tone.Soft,
+                    modifier = Modifier.weight(1f),
+                )
+                latest?.let {
+                    Text(
+                        it.finishedAt,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = DigitFamily, textDirection = TextDirection.Ltr),
+                        color = Tone.Muted,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
-    PageTitle("ספסל הסריקה")
     if (!ui.hasVehicle) {
+        PageTitle("ספסל הסריקה")
         Banner("אין רכב נבחר. חוזרים לבית ובוחרים פרופיל.")
         QuietAction("לבית", enabled = true, selected = false) { vm.showHome() }
         return
     }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) { PageTitle("ספסל הסריקה", eyebrow = ui.nickname) }
+        StatusLamp(ui.sessionLabelHe, on = ui.canDisconnect)
+    }
+
+    InstrumentCluster(ui.latest)
+
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             SectionLabel("הרכב הנוכחי")
-            Text(ui.nickname, style = MaterialTheme.typography.titleLarge, color = Tone.Paper)
-            Text(ui.metaHe, style = MaterialTheme.typography.bodyMedium, color = Tone.Muted)
+            Text(ui.metaHe, style = MaterialTheme.typography.bodyMedium, color = Tone.Soft)
             Note(ui.vinNoteHe)
             HorizontalDivider(thickness = 1.dp, color = Tone.Line, modifier = Modifier.padding(vertical = 6.dp))
             if (!ui.live) StateLine("הצתה", ui.ignitionLabelHe)
@@ -257,11 +338,11 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
     ui.errorHe?.let { Banner(it) }
     PairRow(
         left = { PrimaryAction("התחבר", ui.canConnect) { vm.connect() } },
-        right = { PrimaryAction("סריקה מהירה", ui.canScan) { vm.scan() } },
+        right = { QuietAction("נתק", ui.canDisconnect, false) { vm.disconnect() } },
     )
-    QuietAction("נתק", ui.canDisconnect, false) { vm.disconnect() }
+    IgnitionAction("סריקה מהירה", "קודי תקלה · מוכנות · חיישנים", enabled = ui.canScan) { vm.scan() }
     if (ui.canClear) {
-        QuietAction("מחיקת קודי תקלה…", enabled = true, selected = false) { vm.startClear() }
+        CautionAction("מחיקת קודי תקלה…", enabled = true) { vm.startClear() }
     }
     ui.latest?.let {
         QuietAction("פתח את התוצאה האחרונה", enabled = true, selected = false) { vm.showResult() }
@@ -305,7 +386,7 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
 
 @Composable
 private fun ResultPage(ui: DoctorUi) {
-    PageTitle("תוצאת סריקה")
+    PageTitle("תוצאת סריקה", eyebrow = if (ui.hasVehicle) ui.nickname else null)
     val session = ui.open
     if (session == null) {
         Panel {
@@ -423,6 +504,8 @@ private fun TermLine(term: String, explanation: String) {
 
 @Composable
 private fun SessionBody(session: SessionView) {
+    WarningLamps(session)
+    HorizontalDivider(thickness = 1.dp, color = Tone.Line, modifier = Modifier.padding(vertical = 4.dp))
     Text(session.headlineHe, style = MaterialTheme.typography.titleMedium, color = Tone.Paper)
     session.clearNoteHe?.let {
         InnerBlock {
@@ -446,9 +529,9 @@ private fun SessionBody(session: SessionView) {
     ResultSection("נתוני חיישנים")
     session.samplesNoteHe?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
     session.samples.forEach { SampleBlock(it) }
-    ResultSection("מוכנות")
+    ResultSection("מוכנות לטסט")
     session.monitorsNoteHe?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-    session.monitors.forEach { MonitorBlock(it) }
+    if (session.monitors.isNotEmpty()) ReadinessList(session.monitors)
     ResultSection("יחידות")
     session.ecus.forEach { line -> UnitLine("${line.nameHe} · ${line.badgeHe}", line.detailHe) }
     ResultSection("מחוץ לסריקה · $GAP_BADGE_HE")
@@ -513,11 +596,6 @@ private fun CodeBlock(code: CodeLine) {
 private fun SampleBlock(sample: SampleLine) {
     val value = if (sample.unit.isBlank()) sample.valueHe else "${sample.valueHe} ${sample.unit}"
     Text("${sample.nameHe}: $value · ${sample.ecuHe} · ${sample.qualityHe}", style = MaterialTheme.typography.bodyMedium)
-}
-
-@Composable
-private fun MonitorBlock(monitor: MonitorLine) {
-    Text("${monitor.nameHe} · ${monitor.statusHe}", style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable
@@ -609,7 +687,7 @@ private fun Busy(text: String) {
             CircularProgressIndicator(
                 modifier = Modifier.size(20.dp),
                 strokeWidth = 2.dp,
-                color = Tone.Brass,
+                color = Tone.Accent,
                 trackColor = Tone.Line,
             )
             Text(text, style = MaterialTheme.typography.bodyMedium, color = Tone.Paper)

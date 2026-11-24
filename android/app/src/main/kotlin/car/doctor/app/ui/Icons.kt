@@ -56,6 +56,45 @@ internal object DoctorIcons {
         "M10 15a2 2 0 1 1 0 4a2 2 0 1 1 0-4z",
     )
 
+    /** Push-button start: the power symbol. */
+    val Power = line("power", "M12 3v8", "M6.3 7a8 8 0 1 0 11.4 0", width = 2.2f)
+
+    /** Check-engine lamp outline. */
+    val Engine = line(
+        "engine",
+        "M4 10h2V8h3V6h6v2h2l2 2h1v5h-1l-2 2H9l-2-2H6v-2H4z",
+        "M11 6V4h3",
+        width = 1.7f,
+    )
+
+    /** Airbag lamp: a seated figure and the bag. */
+    val Airbag = line(
+        "airbag",
+        "M8 3.5a1.6 1.6 0 1 1 0 3.2a1.6 1.6 0 1 1 0-3.2z",
+        "M7 9l1.2 6.5h4.8l2.5 4.5",
+        "M8.2 12.5h3.3",
+        "M17 8a3 3 0 1 1 0 6a3 3 0 1 1 0-6z",
+        width = 1.7f,
+    )
+
+    /** Body control: a car outline. */
+    val Car = line(
+        "car",
+        "M4 16v-3.5L6.2 8h11.6l2.2 4.5V16z",
+        "M4 12.5h16",
+        "M6 16v2M18 16v2",
+        width = 1.7f,
+    )
+
+    /** Brake system (ABS lamp): a disc inside brackets. */
+    val Brake = line(
+        "brake",
+        "M12 6.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11z",
+        "M5 7.5a8 8 0 0 0 0 9",
+        "M19 7.5a8 8 0 0 1 0 9",
+        width = 1.7f,
+    )
+
     val Check = line("check", "M5 12.5l4.5 4.5L19 7.5", width = 2.2f)
 
     /** Points right in LTR; mirrored to point left (forward) in RTL. */
