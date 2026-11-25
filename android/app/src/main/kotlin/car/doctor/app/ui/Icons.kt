@@ -14,6 +14,17 @@ import androidx.compose.ui.unit.dp
  * a clock or a gauge must not flip.
  */
 internal object DoctorIcons {
+    /** A calendar page, for picking a date. */
+    val Calendar = line(
+        "calendar",
+        "M5.5 5.5h13a1.5 1.5 0 0 1 1.5 1.5v11.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5V7a1.5 1.5 0 0 1 1.5-1.5z",
+        "M4 10h16",
+        "M8.5 3.5v4",
+        "M15.5 3.5v4",
+        "M8 14h2",
+        "M14 14h2",
+    )
+
     val Home = line(
         "home",
         "M4 10.2 12 4l8 6.2V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z",

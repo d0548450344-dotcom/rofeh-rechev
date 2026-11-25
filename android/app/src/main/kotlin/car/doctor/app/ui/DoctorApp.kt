@@ -1,5 +1,14 @@
 package car.doctor.app.ui
 
+import car.doctor.core.care.ServiceKind
+import car.doctor.core.care.IntervalUnit
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePicker
 import androidx.compose.runtime.remember
 import car.doctor.core.care.TrendDirection
 import car.doctor.core.care.TrendReport
@@ -874,21 +883,110 @@ private fun CarePanel(ui: DoctorUi, vm: DoctorViewModel) {
                 val plan = ui.care
                 val summary = buildString {
                     append(if ((plan?.checkEveryDays ?: 0) > 0) "סריקה כל ${plan?.checkEveryDays} ימים" else "בלי תזכורת סריקה")
-                    plan?.nextServiceDate()?.let { append(" · טיפול הבא ב-$it") } ?: append(" · תאריך טיפול לא הוזן")
+                    val next = plan?.let { p ->
+                        listOfNotNull(
+                            p.nextServiceReading()?.let { "$it ${p.intervalUnit.shortHe}" },
+                            p.nextServiceDate()?.let { "%02d/%02d/%d".format(it.dayOfMonth, it.monthValue, it.year) },
+                        )
+                    }.orEmpty()
+                    append(if (next.isEmpty()) " · פרטי הטיפול האחרון לא הוזנו" else " · טיפול הבא: ${next.joinToString(" או ")}")
+                    if (plan?.lastServiceDate != null) append(" · אחרון: ${plan.serviceKind.labelHe}")
                 }
                 Note(summary)
                 QuietAction("הגדרת תזכורות וטיפולים…", enabled = ui.hasVehicle, selected = false) { vm.openCareForm() }
             } else {
-                Note("תזכורות מופיעות כשפותחים את האפליקציה. אין ב-OBD-II מד קילומטראז׳ כללי, לכן הטיפול לפי תאריך.")
-                Field("סריקה תקופתית כל כמה ימים (0 = בלי)", vm.checkEveryText, number = true, ltr = true) { vm.checkEveryText = it }
-                Field("תאריך הטיפול האחרון", vm.lastServiceText, ltr = true, supporting = "בפורמט 2026-03-15") { vm.lastServiceText = it }
-                Field("טיפול כל כמה חודשים", vm.serviceMonthsText, number = true, ltr = true) { vm.serviceMonthsText = it }
-                Field("הערה לטיפול (למשל: 15,000 ק״מ, שמן ופילטרים)", vm.serviceNote) { vm.serviceNote = it }
-                PairRow(
-                    left = { PrimaryAction("שמור", enabled = ui.busyHe == null) { vm.submitCare() } },
-                    right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelCareForm() } },
-                )
+                CareForm(ui, vm)
             }
+        }
+    }
+}
+
+@Composable
+private fun CareForm(ui: DoctorUi, vm: DoctorViewModel) {
+    val unit = vm.intervalUnit
+    Note("התזכורות מופיעות כשפותחים את האפליקציה.")
+    FieldCaption("סוג הטיפול")
+    ServiceKind.entries.forEach { kind ->
+        QuietAction(kind.labelHe, enabled = true, selected = vm.serviceKind == kind) { vm.serviceKind = kind }
+    }
+    if (vm.serviceKind == ServiceKind.BASELINE) {
+        Note("טיפול יישור קו: טיפול מקיף שמאפס את היסטוריית הטיפולים, בדרך כלל אחרי קניית רכב משומש. הטיפולים הבאים נספרים ממנו.")
+    }
+    ServiceDateField(vm.lastServiceText) { vm.lastServiceText = it }
+    FieldCaption("מרווח בין טיפולים לפי")
+    Segmented(
+        options = IntervalUnit.entries,
+        selected = unit,
+        label = { it.labelHe },
+        onSelect = { vm.chooseIntervalUnit(it) },
+    )
+    Field("טיפול כל כמה ${unit.labelHe}", vm.intervalText, number = true, ltr = true) { vm.intervalText = it }
+    Field("${unit.labelHe} בטיפול האחרון", vm.lastReadingText, number = true, ltr = true) { vm.lastReadingText = it }
+    val readHint = ui.currentReading?.let { "הקריאה הידועה כרגע: $it. בדיקה מעמיקה מנסה לקרוא מהרכב." }
+        ?: "רוב הרכבים לא מדווחים ${unit.labelHe} דרך OBD. בדיקה מעמיקה מנסה; אם לא, מעדכנים כאן."
+    Field("${unit.labelHe} עכשיו", vm.currentReadingText, number = true, ltr = true, supporting = readHint) {
+        vm.currentReadingText = it
+    }
+    Field("וגם כל כמה חודשים, מה שמגיע קודם (0 = בלי)", vm.serviceMonthsText, number = true, ltr = true) { vm.serviceMonthsText = it }
+    Field("סריקה תקופתית כל כמה ימים (0 = בלי)", vm.checkEveryText, number = true, ltr = true) { vm.checkEveryText = it }
+    Field("הערה לטיפול (למשל: שמן ופילטרים)", vm.serviceNote) { vm.serviceNote = it }
+    PairRow(
+        left = { PrimaryAction("שמור", enabled = ui.busyHe == null) { vm.submitCare() } },
+        right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelCareForm() } },
+    )
+}
+
+/** Shows the chosen service date and opens a calendar. Future dates cannot be picked. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ServiceDateField(value: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val parsed = remember(value) { runCatching { java.time.LocalDate.parse(value) }.getOrNull() }
+    FieldCaption("תאריך הטיפול האחרון / הנוכחי")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(ControlShape)
+            .background(Tone.Sunken)
+            .border(1.dp, Tone.LineStrong, ControlShape)
+            .clickable { open = true }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(DoctorIcons.Calendar, contentDescription = null, tint = Tone.AccentText)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            parsed?.let { "%02d/%02d/%d".format(it.dayOfMonth, it.monthValue, it.year) } ?: "בחרו תאריך בלוח השנה",
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (parsed != null) Tone.Paper else Tone.Muted,
+            modifier = Modifier.weight(1f),
+        )
+        if (parsed != null) {
+            TextButton(onClick = { onPick("") }) { Text("נקה", color = Tone.Muted) }
+        }
+    }
+    if (open) {
+        val todayMs = remember { System.currentTimeMillis() }
+        val initial = parsed?.atStartOfDay(java.time.ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = initial ?: todayMs,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= todayMs
+            },
+        )
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { ms ->
+                        onPick(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString())
+                    }
+                    open = false
+                }) { Text("סיום", color = Tone.AccentText) }
+            },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("ביטול", color = Tone.Soft) } },
+        ) {
+            DatePicker(state = state)
         }
     }
 }

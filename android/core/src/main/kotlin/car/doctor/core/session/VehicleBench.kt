@@ -1,6 +1,7 @@
 package car.doctor.core.session
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.IntervalUnit
 import car.doctor.core.care.Reminder
 import car.doctor.core.care.Reminders
 import car.doctor.core.care.TrendReport
@@ -112,13 +113,31 @@ class VehicleBench(
     fun setCarePlan(plan: CarePlan): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         val date = plan.lastServiceDate?.trim()?.takeIf { it.isNotEmpty() }
-        if (date != null && runCatching { java.time.LocalDate.parse(date) }.isFailure) {
-            return rejected("תאריך הטיפול צריך להיות בפורמט 2026-03-15.")
+        if (date != null) {
+            val parsed = runCatching { java.time.LocalDate.parse(date) }.getOrNull()
+                ?: return rejected("תאריך הטיפול לא תקין.")
+            val today = Reminders.day(clock.now())
+            if (today != null && parsed.isAfter(today)) return rejected("תאריך הטיפול לא יכול להיות בעתיד.")
         }
         if (plan.checkEveryDays !in 0..90) return rejected("תדירות סריקה: בין 0 (בלי תזכורת) ל-90 ימים.")
-        if (plan.serviceEveryMonths !in 1..36) return rejected("מרווח בין טיפולים: בין 1 ל-36 חודשים.")
+        if (plan.serviceEveryMonths !in 0..36) return rejected("חודשים בין טיפולים: בין 0 (בלי) ל-36.")
+        val range = if (plan.intervalUnit == IntervalUnit.KM) 1_000..100_000 else 50..2_000
+        if (plan.intervalAmount !in range) {
+            return rejected("מרווח בין טיפולים: בין ${range.first} ל-${range.last} ${plan.intervalUnit.shortHe}.")
+        }
+        val readings = listOfNotNull(plan.lastServiceReading, plan.currentReading)
+        if (readings.any { it !in 0..2_000_000 }) return rejected("קריאת ${plan.intervalUnit.labelHe} לא תקינה.")
+        if (plan.lastServiceReading != null && plan.currentReading != null && plan.currentReading < plan.lastServiceReading) {
+            return rejected("הקריאה הנוכחית קטנה מהקריאה בטיפול האחרון.")
+        }
         repository.upsertVehicle(vehicle.copy(care = plan.copy(lastServiceDate = date, serviceNoteHe = plan.serviceNoteHe.trim().take(80))))
         return accepted()
+    }
+
+    /** Odometer or engine hours: typed, or read from the car in a scan, whichever is higher. */
+    fun currentReading(): Int? {
+        val vehicle = selected() ?: return null
+        return Reminders.currentReading(vehicle.care, repository.sessionsFor(vehicle.id))
     }
 
     fun reminders(): List<Reminder> {

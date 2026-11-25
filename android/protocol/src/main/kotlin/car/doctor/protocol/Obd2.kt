@@ -37,6 +37,12 @@ enum class ObdPid(val code: Int, val label: String, val unit: String, val byteCo
     FUEL_LEVEL(0x2F, "Fuel Tank Level", "%", 1),
     DISTANCE_SINCE_CLEAR(0x31, "Distance Since Codes Cleared", "km", 2),
     AMBIENT_AIR_TEMP(0x46, "Ambient Air Temperature", "°C", 1),
+
+    /** Total engine run time. Byte A says which of the counters exist; B..E is total seconds. */
+    ENGINE_RUN_TOTAL(0x7F, "Engine Run Time (total)", "h", 5),
+
+    /** Odometer. Newer cars only; many do not answer. */
+    ODOMETER(0xA6, "Odometer", "km", 4),
     ;
 
     companion object {
@@ -57,6 +63,8 @@ enum class PidFormula(val expression: String) {
     TIMING("A/2-64"),
     MAF("((A*256)+B)/100"),
     WORD("(A*256)+B"),
+    HOURS_FROM_SECONDS("(B*2^24+C*2^16+D*2^8+E)/3600"),
+    ODOMETER("(A*2^24+B*2^16+C*2^8+D)/10"),
 }
 
 data class PidReading(
@@ -125,6 +133,9 @@ val WRITE_AND_FLASH_SERVICES: Set<Int> = setOf(
     0x85, // control DTC setting
 )
 
+private fun dword(b: List<Int>, from: Int): Double =
+    ((b[from].toLong() shl 24) + (b[from + 1].toLong() shl 16) + (b[from + 2].toLong() shl 8) + b[from + 3].toLong()).toDouble()
+
 /** Value and formula for one PID's data bytes (SAE J1979). */
 internal fun decodeValue(pid: ObdPid, used: List<Int>): Pair<Double, PidFormula> {
     fun word() = ((used[0] shl 8) + used[1]).toDouble()
@@ -141,6 +152,8 @@ internal fun decodeValue(pid: ObdPid, used: List<Int>): Pair<Double, PidFormula>
         ObdPid.INTAKE_AIR_TEMP, ObdPid.AMBIENT_AIR_TEMP -> used[0] - 40.0 to PidFormula.TEMPERATURE
         ObdPid.MAF_RATE -> word() / 100.0 to PidFormula.MAF
         ObdPid.RUN_TIME, ObdPid.DISTANCE_WITH_MIL, ObdPid.DISTANCE_SINCE_CLEAR -> word() to PidFormula.WORD
+        ObdPid.ENGINE_RUN_TOTAL -> dword(used, 1) / 3600.0 to PidFormula.HOURS_FROM_SECONDS
+        ObdPid.ODOMETER -> dword(used, 0) / 10.0 to PidFormula.ODOMETER
         ObdPid.MONITOR_STATUS, ObdPid.FREEZE_DTC -> error("not a measured value")
     }
 }

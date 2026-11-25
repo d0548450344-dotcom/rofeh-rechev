@@ -2,6 +2,7 @@ package car.doctor.core
 
 import car.doctor.core.care.CarePlan
 import car.doctor.core.care.ReminderKind
+import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.Reminders
 import car.doctor.core.care.TrendDirection
 import car.doctor.core.care.Trends
@@ -43,13 +44,33 @@ private fun session(
 
 class CareTest {
     @Test
-    fun serviceOverdueAndSoon() {
+    fun serviceOverdueAndSoonByDate() {
         val overdue = Reminders.forVehicle(CarePlan(lastServiceDate = "2025-10-01", serviceEveryMonths = 12), emptyList(), emptyList(), "2026-11-25T08:00:00Z")
         assertTrue(overdue.any { it.kind == ReminderKind.SERVICE_DUE && it.urgent })
         val soon = Reminders.forVehicle(CarePlan(lastServiceDate = "2025-12-10"), emptyList(), emptyList(), "2026-11-25T08:00:00Z")
         assertTrue(soon.any { it.kind == ReminderKind.SERVICE_SOON })
-        val later = Reminders.forVehicle(CarePlan(lastServiceDate = "2026-06-01", checkEveryDays = 0), emptyList(), emptyList(), "2026-11-25T08:00:00Z")
+        val later = Reminders.forVehicle(CarePlan(lastServiceDate = "2026-06-01", checkEveryDays = 0), emptyList(), emptyList(), "2026-05-25T08:00:00Z")
         assertTrue(later.isEmpty())
+    }
+
+    @Test
+    fun serviceByKmUsesTheHigherOfTypedAndRead() {
+        val plan = CarePlan(checkEveryDays = 0, serviceEveryMonths = 0, intervalAmount = 15000, lastServiceReading = 100_000, currentReading = 110_000)
+        assertTrue(Reminders.forVehicle(plan, emptyList(), emptyList(), "2026-05-25T08:00:00Z").isEmpty())
+        val read = session("2026-05-24").let { it.copy(pids = it.pids + pid("odometer", 114_200.0)) }
+        val r = Reminders.forVehicle(plan, listOf(read), emptyList(), "2026-05-25T08:00:00Z")
+        assertEquals(ReminderKind.SERVICE_SOON, r.single().kind)
+        assertTrue(r.single().titleHe.contains("800"))
+        val due = Reminders.forVehicle(plan.copy(currentReading = 116_000), emptyList(), emptyList(), "2026-05-25T08:00:00Z")
+        assertTrue(due.single().urgent)
+    }
+
+    @Test
+    fun winterReminderUntilAWinterServiceIsSaved() {
+        val r = Reminders.forVehicle(CarePlan(checkEveryDays = 0, serviceEveryMonths = 0), emptyList(), emptyList(), "2026-10-20T08:00:00Z")
+        assertTrue(r.any { it.kind == ReminderKind.WINTER })
+        val done = CarePlan(checkEveryDays = 0, serviceEveryMonths = 0, serviceKind = ServiceKind.WINTER, lastServiceDate = "2026-10-05")
+        assertTrue(Reminders.forVehicle(done, emptyList(), emptyList(), "2026-10-20T08:00:00Z").isEmpty())
     }
 
     @Test

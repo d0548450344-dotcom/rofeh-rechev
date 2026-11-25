@@ -417,6 +417,8 @@ class Elm327ObdAdapter(
             PidSpec(ObdPid.DISTANCE_SINCE_CLEAR, "dist_clear", "נסועה מאז מחיקת קודים", "ק״מ", engineOnly = false),
             PidSpec(ObdPid.AMBIENT_AIR_TEMP, "ambient", "טמפרטורת סביבה", "°C", engineOnly = false),
             PidSpec(ObdPid.RUN_TIME, "run_time", "זמן מאז התנעה", "s", engineOnly = true),
+            PidSpec(ObdPid.ODOMETER, "odometer", "מד מרחק", "ק״מ", engineOnly = false),
+            PidSpec(ObdPid.ENGINE_RUN_TOTAL, "engine_hours", "שעות מנוע", "שעות", engineOnly = true),
         )
 
         private val LIVE_PIDS = listOf(

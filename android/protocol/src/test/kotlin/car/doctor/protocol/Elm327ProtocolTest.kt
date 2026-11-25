@@ -374,4 +374,10 @@ class Elm327ProtocolTest {
         assertEquals(listOf(listOf(0x41, 0x0C, 0x0F, 0xA0)), (ok as ElmResponseParser.Result.Messages).messages)
         assertNull(ElmResponseParser.classify("41 0C 0F A0"))
     }
+
+    @Test
+    fun odometerAndEngineHoursDecode() {
+        assertEquals(114_180.4, decodeValue(ObdPid.ODOMETER, listOf(0x00, 0x11, 0x6C, 0x2C)).first, 0.01)
+        assertEquals(800.0, decodeValue(ObdPid.ENGINE_RUN_TOTAL, listOf(0x01, 0x00, 0x2B, 0xF2, 0x00)).first, 0.01)
+    }
 }

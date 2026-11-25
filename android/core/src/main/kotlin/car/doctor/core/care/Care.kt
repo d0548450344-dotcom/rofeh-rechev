@@ -12,26 +12,53 @@ import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 import kotlin.math.round
 
+enum class ServiceKind(val labelHe: String) {
+    PERIODIC("טיפול תקופתי"),
+    WINTER("טיפול הכנה לחורף"),
+
+    /** A full catch-up service, usually after buying a used car, that resets the service history. */
+    BASELINE("טיפול יישור קו"),
+}
+
+enum class IntervalUnit(val labelHe: String, val shortHe: String, val pidId: String) {
+    KM("ק״מ", "ק״מ", "odometer"),
+    ENGINE_HOURS("שעות מנוע", "שעות", "engine_hours"),
+}
+
 /**
- * What the user wants to be reminded about for one car. All dates are typed by the user.
- * OBD-II has no generic odometer, so service reminders are by date only.
+ * What the user wants to be reminded about for one car. Dates and readings are typed by the user.
+ * Many cars do not report the odometer or engine hours over OBD-II, so the current reading is
+ * typed too; when a deep scan does read it from the car, the higher of the two is used.
  */
 @Serializable
 data class CarePlan(
     /** How often the user wants a routine scan. 0 = never remind. */
     val checkEveryDays: Int = 7,
-    /** yyyy-MM-dd of the last service, as typed. Null = not set. */
+    /** yyyy-MM-dd of the last (or current) service, as typed. Null = not set. */
     val lastServiceDate: String? = null,
+    val serviceKind: ServiceKind = ServiceKind.PERIODIC,
+    val intervalUnit: IntervalUnit = IntervalUnit.KM,
+    /** Km or engine hours between services. */
+    val intervalAmount: Int = 15000,
+    /** Odometer or engine hours at the last service. */
+    val lastServiceReading: Int? = null,
+    /** Odometer or engine hours now, as typed by the user. */
+    val currentReading: Int? = null,
+    /** Also by time, whichever comes first. 0 = by reading only. */
     val serviceEveryMonths: Int = 12,
-    /** Free text for the user ("15,000 ק״מ", "שמן + פילטרים"). Never computed. */
+    /** Free text for the user ("שמן + פילטרים"). Never computed. */
     val serviceNoteHe: String = "",
 ) {
-    fun nextServiceDate(): LocalDate? =
-        lastServiceDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    fun nextServiceDate(): LocalDate? {
+        if (serviceEveryMonths <= 0) return null
+        return lastServiceDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
             ?.plusMonths(serviceEveryMonths.coerceIn(1, 60).toLong())
+    }
+
+    fun nextServiceReading(): Int? = lastServiceReading?.let { it + intervalAmount }
 }
 
-enum class ReminderKind { SERVICE_DUE, SERVICE_SOON, FOLLOW_UP_AFTER_CLEAR, ROUTINE_SCAN, OPEN_VISIT }
+enum class ReminderKind { SERVICE_DUE, SERVICE_SOON, WINTER, FOLLOW_UP_AFTER_CLEAR, ROUTINE_SCAN, OPEN_VISIT }
 
 data class Reminder(val kind: ReminderKind, val titleHe: String, val detailHe: String, val urgent: Boolean)
 
@@ -41,11 +68,51 @@ object Reminders {
     const val OPEN_VISIT_DAYS = 2L
 
     /** Newest-first sessions and visits for one vehicle. [now] is an ISO instant. */
+    /** The highest reading known: typed by the user, or read from the car in a scan. */
+    fun currentReading(plan: CarePlan, sessions: List<DiagnosticSession>): Int? {
+        val fromCar = sessions.firstNotNullOfOrNull { s ->
+            s.pids.firstOrNull { it.id == plan.intervalUnit.pidId && it.value != null }?.value?.toInt()
+        }
+        return listOfNotNull(plan.currentReading, fromCar).maxOrNull()
+    }
+
     fun forVehicle(plan: CarePlan, sessions: List<DiagnosticSession>, visits: List<GarageVisit>, now: String): List<Reminder> {
         val today = day(now) ?: return emptyList()
         val out = mutableListOf<Reminder>()
+        val unit = plan.intervalUnit.shortHe
 
-        plan.nextServiceDate()?.let { due ->
+        val nextReading = plan.nextServiceReading()
+        val current = currentReading(plan, sessions)
+        if (nextReading != null && current != null) {
+            val left = nextReading - current
+            val warnAt = maxOf(plan.intervalAmount / 10, 1)
+            when {
+                left < 0 -> out += Reminder(
+                    ReminderKind.SERVICE_DUE, "הטיפול עבר ב-${-left} $unit",
+                    "הטיפול היה אמור להיות ב-$nextReading $unit, ועכשיו $current. מומלץ לסרוק לפני הכניסה למוסך ולפתוח ביקור.",
+                    urgent = true,
+                )
+                left <= warnAt -> out += Reminder(
+                    ReminderKind.SERVICE_SOON, "טיפול בעוד $left $unit",
+                    "טיפול מתוכנן ב-$nextReading $unit (עכשיו $current). לפני הכניסה: סריקה ופתיחת ביקור במוסך.",
+                    urgent = false,
+                )
+            }
+        }
+
+        if (today.monthValue in 10..11) {
+            val doneThisYear = plan.serviceKind == ServiceKind.WINTER &&
+                plan.lastServiceDate?.let { runCatching { LocalDate.parse(it).year }.getOrNull() } == today.year
+            if (!doneThisYear) {
+                out += Reminder(
+                    ReminderKind.WINTER, "טיפול הכנה לחורף",
+                    "לפני הגשמים: מגבים, צמיגים, מצבר, אורות ונוזל קירור. אם כבר נעשה, שומרים טיפול מסוג ״הכנה לחורף״.",
+                    urgent = false,
+                )
+            }
+        }
+
+        if (out.none { it.kind == ReminderKind.SERVICE_DUE || it.kind == ReminderKind.SERVICE_SOON }) plan.nextServiceDate()?.let { due ->
             val left = ChronoUnit.DAYS.between(today, due)
             val note = plan.serviceNoteHe.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
             when {

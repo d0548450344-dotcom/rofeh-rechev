@@ -1,6 +1,8 @@
 package car.doctor.app
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.IntervalUnit
+import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.Reminder
 import car.doctor.core.care.TrendReport
 import android.os.Handler
@@ -96,6 +98,8 @@ data class DoctorUi(
     val reminders: List<Reminder> = emptyList(),
     val trends: TrendReport? = null,
     val care: CarePlan? = null,
+    /** Odometer or engine hours, typed or read from the car. */
+    val currentReading: Int? = null,
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -352,6 +356,11 @@ class DoctorViewModel(
         private set
     var checkEveryText by mutableStateOf("7")
     var lastServiceText by mutableStateOf("")
+    var serviceKind by mutableStateOf(ServiceKind.PERIODIC)
+    var intervalUnit by mutableStateOf(IntervalUnit.KM)
+    var intervalText by mutableStateOf("15000")
+    var lastReadingText by mutableStateOf("")
+    var currentReadingText by mutableStateOf("")
     var serviceMonthsText by mutableStateOf("12")
     var serviceNote by mutableStateOf("")
 
@@ -359,9 +368,22 @@ class DoctorViewModel(
         val plan = bench.carePlan() ?: CarePlan()
         checkEveryText = plan.checkEveryDays.toString()
         lastServiceText = plan.lastServiceDate.orEmpty()
+        serviceKind = plan.serviceKind
+        intervalUnit = plan.intervalUnit
+        intervalText = plan.intervalAmount.toString()
+        lastReadingText = plan.lastServiceReading?.toString().orEmpty()
+        currentReadingText = plan.currentReading?.toString().orEmpty()
         serviceMonthsText = plan.serviceEveryMonths.toString()
         serviceNote = plan.serviceNoteHe
         careOpen = true
+    }
+
+    fun chooseIntervalUnit(unit: IntervalUnit) {
+        if (unit == intervalUnit) return
+        intervalUnit = unit
+        intervalText = if (unit == IntervalUnit.KM) "15000" else "250"
+        lastReadingText = ""
+        currentReadingText = ""
     }
 
     fun cancelCareForm() {
@@ -369,14 +391,28 @@ class DoctorViewModel(
     }
 
     fun submitCare() {
-        val every = checkEveryText.trim().toIntOrNull()
-        val months = serviceMonthsText.trim().toIntOrNull()
-        if (every == null || months == null) {
-            noticeHe = "תדירות ומרווח צריכים להיות מספרים."
+        fun num(text: String) = text.replace(",", "").trim()
+        val every = num(checkEveryText).toIntOrNull()
+        val months = num(serviceMonthsText).toIntOrNull()
+        val interval = num(intervalText).toIntOrNull()
+        val lastReading = num(lastReadingText).takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: -1 }
+        val current = num(currentReadingText).takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: -1 }
+        if (every == null || months == null || interval == null) {
+            noticeHe = "תדירות, מרווח וחודשים צריכים להיות מספרים."
             ui = compose()
             return
         }
-        val plan = CarePlan(every, lastServiceText.trim().ifEmpty { null }, months, serviceNote)
+        val plan = CarePlan(
+            checkEveryDays = every,
+            lastServiceDate = lastServiceText.trim().ifEmpty { null },
+            serviceKind = serviceKind,
+            intervalUnit = intervalUnit,
+            intervalAmount = interval,
+            lastServiceReading = lastReading,
+            currentReading = current,
+            serviceEveryMonths = months,
+            serviceNoteHe = serviceNote,
+        )
         act {
             val effect = bench.setCarePlan(plan)
             noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
@@ -611,6 +647,7 @@ class DoctorViewModel(
             reminders = bench.reminders(),
             trends = bench.trends(),
             care = bench.carePlan(),
+            currentReading = bench.currentReading(),
         )
     }
 
