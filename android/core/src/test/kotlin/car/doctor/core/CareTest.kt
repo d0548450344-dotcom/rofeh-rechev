@@ -126,4 +126,45 @@ class CareTest {
         assertTrue(t.pids.isEmpty())
         assertTrue(t.noteHe.contains("לפחות"))
     }
+
+    private fun bench(): car.doctor.core.session.VehicleBench {
+        var n = 0
+        val b = car.doctor.core.session.VehicleBench(
+            repository = car.doctor.core.persistence.SnapshotGarageRepository(),
+            adapters = car.doctor.core.adapter.ObdAdapterFactory { error("no adapter in this test") },
+            clock = car.doctor.core.session.IsoClock { "2026-11-25T10:00:00.000Z" },
+            ids = car.doctor.core.session.IdSource { p -> "$p-${++n}" },
+        )
+        b.addVehicle(car.doctor.core.model.NewVehicle("טסט", "טויוטה", "קורולה", 2016, car.doctor.core.model.Fuel.GASOLINE, ""))
+        return b
+    }
+
+    @Test
+    fun everySavedServiceIsKeptAndTheNewestDrivesReminders() {
+        val b = bench()
+        b.setCarePlan(CarePlan(lastServiceDate = "2025-06-01", lastServiceReading = 90_000), "מוסך א")
+        b.setCarePlan(CarePlan(lastServiceDate = "2026-06-01", lastServiceReading = 105_000, serviceKind = ServiceKind.BASELINE))
+        // re-saving the same service updates it instead of adding a duplicate
+        b.setCarePlan(CarePlan(lastServiceDate = "2026-06-01", lastServiceReading = 105_500, serviceKind = ServiceKind.BASELINE))
+        // an older service added later goes into the history only
+        b.setCarePlan(CarePlan(lastServiceDate = "2024-06-01", lastServiceReading = 75_000))
+        val history = b.services()
+        assertEquals(listOf("2026-06-01", "2025-06-01", "2024-06-01"), history.map { it.date })
+        assertEquals(105_500, history.first().reading)
+        assertEquals("מוסך א", history[1].garageName)
+        assertEquals("2026-06-01", b.carePlan()!!.lastServiceDate)
+        assertEquals(ServiceKind.BASELINE, b.carePlan()!!.serviceKind)
+        assertEquals(105_500, b.carePlan()!!.lastServiceReading)
+
+        b.removeService(history.first().id)
+        assertEquals("2025-06-01", b.carePlan()!!.lastServiceDate)
+        assertEquals(90_000, b.carePlan()!!.lastServiceReading)
+    }
+
+    @Test
+    fun aFutureServiceDateIsRejected() {
+        val b = bench()
+        assertTrue(b.setCarePlan(CarePlan(lastServiceDate = "2026-12-01")) is car.doctor.core.session.BenchEffect.Rejected)
+        assertTrue(b.services().isEmpty())
+    }
 }

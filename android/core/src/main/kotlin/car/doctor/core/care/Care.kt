@@ -58,6 +58,21 @@ data class CarePlan(
     fun nextServiceReading(): Int? = lastServiceReading?.let { it + intervalAmount }
 }
 
+/** One service the car had, as the owner recorded it. Kept for the car's whole life. */
+@Serializable
+data class ServiceRecord(
+    val id: String,
+    val vehicleId: String,
+    /** yyyy-MM-dd */
+    val date: String,
+    val kind: ServiceKind,
+    val unit: IntervalUnit = IntervalUnit.KM,
+    /** Odometer or engine hours at the service, if known. */
+    val reading: Int? = null,
+    val garageName: String = "",
+    val noteHe: String = "",
+)
+
 enum class ReminderKind { SERVICE_DUE, SERVICE_SOON, WINTER, FOLLOW_UP_AFTER_CLEAR, ROUTINE_SCAN, OPEN_VISIT }
 
 data class Reminder(val kind: ReminderKind, val titleHe: String, val detailHe: String, val urgent: Boolean)

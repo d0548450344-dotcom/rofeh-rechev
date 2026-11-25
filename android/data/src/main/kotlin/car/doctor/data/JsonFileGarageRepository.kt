@@ -1,5 +1,6 @@
 package car.doctor.data
 
+import car.doctor.core.care.ServiceRecord
 import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.Vehicle
 import car.doctor.core.persistence.GarageRepository
@@ -45,6 +46,9 @@ class JsonFileGarageRepository(private val file: File) : GarageRepository {
     override fun sessionsFor(vehicleId: String): List<DiagnosticSession> = inner.sessionsFor(vehicleId)
     override fun upsertVisit(visit: GarageVisit) = inner.upsertVisit(visit)
     override fun visitsFor(vehicleId: String): List<GarageVisit> = inner.visitsFor(vehicleId)
+    override fun upsertService(record: ServiceRecord) = inner.upsertService(record)
+    override fun removeService(id: String) = inner.removeService(id)
+    override fun servicesFor(vehicleId: String): List<ServiceRecord> = inner.servicesFor(vehicleId)
 
     private fun readOrEmpty(): GarageSnapshot {
         if (!file.isFile) return GarageSnapshot()

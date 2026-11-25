@@ -1,5 +1,6 @@
 package car.doctor.core.persistence
 
+import car.doctor.core.care.ServiceRecord
 import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.Vehicle
 import car.doctor.core.visit.GarageVisit
@@ -17,6 +18,7 @@ data class GarageSnapshot(
     val sessions: List<DiagnosticSession> = emptyList(),
     val selectedId: String? = null,
     val visits: List<GarageVisit> = emptyList(),
+    val services: List<ServiceRecord> = emptyList(),
 )
 
 /**
@@ -36,6 +38,11 @@ interface GarageRepository {
     fun sessionsFor(vehicleId: String): List<DiagnosticSession>
     fun upsertVisit(visit: GarageVisit)
     fun visitsFor(vehicleId: String): List<GarageVisit>
+    fun upsertService(record: ServiceRecord)
+    fun removeService(id: String)
+
+    /** Newest service first. */
+    fun servicesFor(vehicleId: String): List<ServiceRecord>
 }
 
 /**
@@ -73,6 +80,7 @@ class SnapshotGarageRepository(
             vehicles = current.vehicles.filterNot { it.id == id },
             sessions = current.sessions.filterNot { it.vehicleId == id },
             visits = current.visits.filterNot { it.vehicleId == id },
+            services = current.services.filterNot { it.vehicleId == id },
             selectedId = selected,
         )
         onWrite(current)
@@ -107,6 +115,22 @@ class SnapshotGarageRepository(
     override fun visitsFor(vehicleId: String): List<GarageVisit> =
         current.visits.filter { it.vehicleId == vehicleId }
 
+    override fun upsertService(record: ServiceRecord) {
+        val services = current.services.toMutableList()
+        val index = services.indexOfFirst { it.id == record.id }
+        if (index >= 0) services[index] = record else services.add(record)
+        current = current.copy(services = services.toList())
+        onWrite(current)
+    }
+
+    override fun removeService(id: String) {
+        current = current.copy(services = current.services.filterNot { it.id == id })
+        onWrite(current)
+    }
+
+    override fun servicesFor(vehicleId: String): List<ServiceRecord> =
+        current.services.filter { it.vehicleId == vehicleId }.sortedByDescending { it.date }
+
     /** Newest first, at most [HISTORY_LIMIT], but never a scan a garage visit refers to. */
     private fun trimmed(sessions: List<DiagnosticSession>): List<DiagnosticSession> {
         if (sessions.size <= HISTORY_LIMIT) return sessions
@@ -124,5 +148,6 @@ class SnapshotGarageRepository(
         vehicles = snapshot.vehicles.toList(),
         sessions = snapshot.sessions.toList(),
         visits = snapshot.visits.toList(),
+        services = snapshot.services.toList(),
     )
 }

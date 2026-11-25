@@ -1,6 +1,8 @@
 package car.doctor.core.session
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.ServiceKind
+import car.doctor.core.care.ServiceRecord
 import car.doctor.core.care.IntervalUnit
 import car.doctor.core.care.Reminder
 import car.doctor.core.care.Reminders
@@ -110,7 +112,35 @@ class VehicleBench(
     fun carePlan(): CarePlan? = selected()?.care
 
     /** Validates and stores the reminder settings of the selected vehicle. */
-    fun setCarePlan(plan: CarePlan): BenchEffect {
+    fun services(): List<ServiceRecord> {
+        val id = selected()?.id ?: return emptyList()
+        return repository.servicesFor(id)
+    }
+
+    /**
+     * Deletes a service from the history (for a mistaken entry). If it was the latest one,
+     * the reminders count from the service before it.
+     */
+    fun removeService(id: String): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        if (repository.servicesFor(vehicle.id).none { it.id == id }) return rejected("הטיפול לא נמצא.")
+        repository.removeService(id)
+        val latest = repository.servicesFor(vehicle.id).firstOrNull()
+        val care = vehicle.care
+        val next = if (latest == null) {
+            care.copy(lastServiceDate = null, lastServiceReading = null, serviceKind = ServiceKind.PERIODIC)
+        } else {
+            care.copy(
+                lastServiceDate = latest.date,
+                serviceKind = latest.kind,
+                lastServiceReading = latest.reading.takeIf { latest.unit == care.intervalUnit },
+            )
+        }
+        repository.upsertVehicle(vehicle.copy(care = next))
+        return accepted()
+    }
+
+    fun setCarePlan(plan: CarePlan, garageName: String = ""): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         val date = plan.lastServiceDate?.trim()?.takeIf { it.isNotEmpty() }
         if (date != null) {
@@ -130,7 +160,33 @@ class VehicleBench(
         if (plan.lastServiceReading != null && plan.currentReading != null && plan.currentReading < plan.lastServiceReading) {
             return rejected("הקריאה הנוכחית קטנה מהקריאה בטיפול האחרון.")
         }
-        repository.upsertVehicle(vehicle.copy(care = plan.copy(lastServiceDate = date, serviceNoteHe = plan.serviceNoteHe.trim().take(80))))
+        var saved = plan.copy(lastServiceDate = date, serviceNoteHe = plan.serviceNoteHe.trim().take(80))
+        if (date != null) {
+            val same = repository.servicesFor(vehicle.id).firstOrNull { it.date == date && it.kind == saved.serviceKind }
+            repository.upsertService(
+                ServiceRecord(
+                    id = same?.id ?: ids.next("svc"),
+                    vehicleId = vehicle.id,
+                    date = date,
+                    kind = saved.serviceKind,
+                    unit = saved.intervalUnit,
+                    reading = saved.lastServiceReading,
+                    garageName = garageName.trim().take(60).ifEmpty { same?.garageName.orEmpty() },
+                    noteHe = saved.serviceNoteHe,
+                ),
+            )
+            // An older service goes into the history; reminders still count from the newest one.
+            val newest = repository.servicesFor(vehicle.id).first()
+            if (newest.date != date) {
+                saved = saved.copy(
+                    lastServiceDate = newest.date,
+                    serviceKind = newest.kind,
+                    lastServiceReading = newest.reading.takeIf { newest.unit == saved.intervalUnit },
+                    serviceNoteHe = newest.noteHe,
+                )
+            }
+        }
+        repository.upsertVehicle(vehicle.copy(care = saved))
         return accepted()
     }
 

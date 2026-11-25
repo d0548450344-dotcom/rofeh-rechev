@@ -437,6 +437,7 @@ private fun HistoryPage(ui: DoctorUi, vm: DoctorViewModel) {
         "היסטוריה",
         "הסריקות שמורות בקובץ מקומי של הרכב הנבחר. סגירת האפליקציה לא מוחקת אותן.",
     )
+    if (ui.services.isNotEmpty()) ServiceHistory(ui, vm)
     ui.trends?.let { TrendsPanel(it) }
     if (ui.visits.isNotEmpty()) {
         SectionLabel("ביקורים במוסך")
@@ -913,6 +914,8 @@ private fun CareForm(ui: DoctorUi, vm: DoctorViewModel) {
         Note("טיפול יישור קו: טיפול מקיף שמאפס את היסטוריית הטיפולים, בדרך כלל אחרי קניית רכב משומש. הטיפולים הבאים נספרים ממנו.")
     }
     ServiceDateField(vm.lastServiceText) { vm.lastServiceText = it }
+    Note("כל טיפול שנשמר נכנס להיסטוריית הטיפולים. אפשר להזין גם טיפולים ישנים, והתזכורות נספרות מהאחרון.")
+    Field("מוסך / נותן שירות (לא חובה)", vm.serviceGarage) { vm.serviceGarage = it }
     FieldCaption("מרווח בין טיפולים לפי")
     Segmented(
         options = IntervalUnit.entries,
@@ -1052,6 +1055,36 @@ private fun WireLogPanel(vm: DoctorViewModel) {
                         putExtra(android.content.Intent.EXTRA_TEXT, text)
                     }
                     context.startActivity(android.content.Intent.createChooser(send, "שיתוף יומן"))
+                }
+            }
+        }
+    }
+}
+
+/** Every recorded service, newest first. Delete needs two taps. */
+@Composable
+private fun ServiceHistory(ui: DoctorUi, vm: DoctorViewModel) {
+    SectionLabel("היסטוריית טיפולים")
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ui.services.forEach { record ->
+                val date = runCatching { java.time.LocalDate.parse(record.date) }.getOrNull()
+                    ?.let { "%02d/%02d/%d".format(it.dayOfMonth, it.monthValue, it.year) } ?: record.date
+                InnerBlock {
+                    Text("$date · ${record.kind.labelHe}", style = MaterialTheme.typography.titleSmall, color = Tone.Paper)
+                    val details = listOfNotNull(
+                        record.reading?.let { "%,d %s".format(it, record.unit.shortHe) },
+                        record.garageName.takeIf { it.isNotBlank() },
+                        record.noteHe.takeIf { it.isNotBlank() },
+                    )
+                    if (details.isNotEmpty()) Note(details.joinToString(" · "))
+                    val confirming = vm.confirmDeleteService == record.id
+                    TextButton(onClick = { vm.removeService(record.id) }, enabled = ui.busyHe == null) {
+                        Text(
+                            if (confirming) "ללחוץ שוב כדי למחוק" else "מחק",
+                            color = if (confirming) Tone.Danger else Tone.Muted,
+                        )
+                    }
                 }
             }
         }

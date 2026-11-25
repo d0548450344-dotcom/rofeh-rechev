@@ -1,6 +1,7 @@
 package car.doctor.app
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.ServiceRecord
 import car.doctor.core.care.IntervalUnit
 import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.Reminder
@@ -100,6 +101,8 @@ data class DoctorUi(
     val care: CarePlan? = null,
     /** Odometer or engine hours, typed or read from the car. */
     val currentReading: Int? = null,
+    /** Every recorded service of the selected car, newest first. */
+    val services: List<ServiceRecord> = emptyList(),
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -363,6 +366,22 @@ class DoctorViewModel(
     var currentReadingText by mutableStateOf("")
     var serviceMonthsText by mutableStateOf("12")
     var serviceNote by mutableStateOf("")
+    var serviceGarage by mutableStateOf("")
+
+    /** A service the user asked to delete; deleting needs a second tap. */
+    var confirmDeleteService by mutableStateOf<String?>(null)
+
+    fun removeService(id: String) {
+        if (confirmDeleteService != id) {
+            confirmDeleteService = id
+            return
+        }
+        confirmDeleteService = null
+        act {
+            noticeHe = (bench.removeService(id) as? BenchEffect.Rejected)?.messageHe
+            null
+        }
+    }
 
     fun openCareForm() {
         val plan = bench.carePlan() ?: CarePlan()
@@ -375,6 +394,7 @@ class DoctorViewModel(
         currentReadingText = plan.currentReading?.toString().orEmpty()
         serviceMonthsText = plan.serviceEveryMonths.toString()
         serviceNote = plan.serviceNoteHe
+        serviceGarage = bench.services().firstOrNull { it.date == plan.lastServiceDate }?.garageName.orEmpty()
         careOpen = true
     }
 
@@ -413,8 +433,9 @@ class DoctorViewModel(
             serviceEveryMonths = months,
             serviceNoteHe = serviceNote,
         )
+        val garage = serviceGarage
         act {
-            val effect = bench.setCarePlan(plan)
+            val effect = bench.setCarePlan(plan, garage)
             noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
             if (effect is BenchEffect.Accepted) main.post { careOpen = false }
             null
@@ -648,6 +669,7 @@ class DoctorViewModel(
             trends = bench.trends(),
             care = bench.carePlan(),
             currentReading = bench.currentReading(),
+            services = bench.services(),
         )
     }
 
