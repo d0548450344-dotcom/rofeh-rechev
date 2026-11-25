@@ -71,7 +71,12 @@ data class ServiceRecord(
     val reading: Int? = null,
     val garageName: String = "",
     val noteHe: String = "",
+    /** The before/after garage visit this service came from, if any. */
+    val visitId: String? = null,
 )
+
+/** What the owner fills in when a finished garage visit should also be saved as a service. */
+data class ServiceDraft(val kind: ServiceKind, val reading: Int?)
 
 enum class ReminderKind { SERVICE_DUE, SERVICE_SOON, WINTER, FOLLOW_UP_AFTER_CLEAR, ROUTINE_SCAN, OPEN_VISIT }
 

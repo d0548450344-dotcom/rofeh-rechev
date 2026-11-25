@@ -1,5 +1,6 @@
 package car.doctor.core.visit
 
+import car.doctor.core.care.ServiceRecord
 import car.doctor.core.catalog.describeDtc
 import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.EcuAccess
@@ -26,6 +27,8 @@ data class GarageVisit(
     val closedAt: String? = null,
     /** What the owner was told was actually done, if they add it when closing. */
     val reportedWork: String = "",
+    /** The service record this visit was saved as, if the owner chose to. */
+    val serviceId: String? = null,
 ) {
     val isOpen: Boolean get() = afterSessionId == null
 }
@@ -141,10 +144,13 @@ data class VisitView(
     val voltageHe: String?,
     val beforeSessionId: String,
     val afterSessionId: String?,
+    /** "נרשם כטיפול: …" when the visit is linked to a service record. */
+    val serviceHe: String? = null,
 )
 
 object VisitPresenter {
-    fun present(visit: GarageVisit, sessions: List<DiagnosticSession>): VisitView {
+    fun present(visit: GarageVisit, sessions: List<DiagnosticSession>, services: List<ServiceRecord> = emptyList()): VisitView {
+        val service = visit.serviceId?.let { id -> services.firstOrNull { it.id == id } }
         val before = sessions.firstOrNull { it.id == visit.beforeSessionId }
         val after = visit.afterSessionId?.let { id -> sessions.firstOrNull { it.id == id } }
         val comparison = if (before != null && after != null) VisitComparer.compare(before, after) else null
@@ -173,6 +179,9 @@ object VisitPresenter {
             voltageHe = voltage,
             beforeSessionId = visit.beforeSessionId,
             afterSessionId = visit.afterSessionId,
+            serviceHe = service?.let { r ->
+                "נרשם כטיפול: ${r.kind.labelHe}" + (r.reading?.let { " · %,d %s".format(it, r.unit.shortHe) } ?: "")
+            },
         )
     }
 }

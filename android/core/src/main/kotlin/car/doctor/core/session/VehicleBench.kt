@@ -1,6 +1,7 @@
 package car.doctor.core.session
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.ServiceDraft
 import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.ServiceRecord
 import car.doctor.core.care.IntervalUnit
@@ -123,8 +124,12 @@ class VehicleBench(
      */
     fun removeService(id: String): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
-        if (repository.servicesFor(vehicle.id).none { it.id == id }) return rejected("הטיפול לא נמצא.")
+        val record = repository.servicesFor(vehicle.id).firstOrNull { it.id == id } ?: return rejected("הטיפול לא נמצא.")
         repository.removeService(id)
+        record.visitId?.let { visitId ->
+            repository.visitsFor(vehicle.id).firstOrNull { it.id == visitId }
+                ?.let { repository.upsertVisit(it.copy(serviceId = null)) }
+        }
         val latest = repository.servicesFor(vehicle.id).firstOrNull()
         val care = vehicle.care
         val next = if (latest == null) {
@@ -140,7 +145,7 @@ class VehicleBench(
         return accepted()
     }
 
-    fun setCarePlan(plan: CarePlan, garageName: String = ""): BenchEffect {
+    fun setCarePlan(plan: CarePlan, garageName: String = "", visitId: String? = null): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         val date = plan.lastServiceDate?.trim()?.takeIf { it.isNotEmpty() }
         if (date != null) {
@@ -173,6 +178,7 @@ class VehicleBench(
                     reading = saved.lastServiceReading,
                     garageName = garageName.trim().take(60).ifEmpty { same?.garageName.orEmpty() },
                     noteHe = saved.serviceNoteHe,
+                    visitId = visitId ?: same?.visitId,
                 ),
             )
             // An older service goes into the history; reminders still count from the newest one.
@@ -237,16 +243,36 @@ class VehicleBench(
     }
 
     /** Closes the open visit with the scan that just finished as the "after" picture. */
-    fun finishGarageVisit(reportedWork: String): BenchEffect {
+    /**
+     * Closes the open visit with the scan just made. With [service], the visit is also saved
+     * as a service in the history (dated today), and the two are linked both ways.
+     */
+    fun finishGarageVisit(reportedWork: String, service: ServiceDraft? = null): BenchEffect {
         val vehicle = selected() ?: return rejected("אין רכב נבחר.")
         val visit = openVisit(vehicle.id) ?: return rejected("אין ביקור פתוח במוסך.")
         val after = freshScan(vehicle.id) ?: return rejected("סורקים אחרי היציאה מהמוסך, ואז סוגרים את הביקור.")
         if (after.id == visit.beforeSessionId || after.finishedAt <= visit.openedAt) {
             return rejected("צריך סריקה חדשה, מאחרי הביקור. הסריקה האחרונה היא עדיין ה\"לפני\".")
         }
-        repository.upsertVisit(
-            visit.copy(afterSessionId = after.id, closedAt = clock.now(), reportedWork = reportedWork.trim().take(1_000)),
-        )
+        val reported = reportedWork.trim().take(1_000)
+        var closed = visit.copy(afterSessionId = after.id, closedAt = clock.now(), reportedWork = reported)
+        if (service != null) {
+            val today = Reminders.day(clock.now())?.toString() ?: return rejected("אין תאריך תקין לטיפול.")
+            val care = vehicle.care
+            val plan = care.copy(
+                lastServiceDate = today,
+                serviceKind = service.kind,
+                lastServiceReading = service.reading,
+                currentReading = listOfNotNull(care.currentReading, service.reading).maxOrNull(),
+                serviceNoteHe = reported.ifEmpty { visit.plannedWork }.take(80),
+            )
+            // Validate first, so a bad reading leaves the visit open instead of half-saved.
+            val effect = setCarePlan(plan, visit.garageName, visitId = visit.id)
+            if (effect is BenchEffect.Rejected) return effect
+            val record = repository.servicesFor(vehicle.id).firstOrNull { it.visitId == visit.id }
+            closed = closed.copy(serviceId = record?.id)
+        }
+        repository.upsertVisit(closed)
         return accepted()
     }
 

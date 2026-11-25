@@ -213,6 +213,7 @@ private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
         VehicleHero(ui)
         PrimaryAction("לספסל הסריקה", enabled = true) { vm.showBench() }
         CarePanel(ui, vm)
+        FindServicePanel(ui.make)
     } else {
         Text(
             "קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. מחיקת קודים עם הגנות; אין צריבה.",
@@ -812,6 +813,20 @@ private fun VisitActions(ui: DoctorUi, vm: DoctorViewModel) {
                 SectionLabel("אחרי היציאה מהמוסך")
                 ui.openVisit?.let { Note("מתוכנן היה: ${it.plannedWorkHe}") }
                 Field("מה המוסך אמר שנעשה (לא חובה)", vm.reportedWork) { vm.reportedWork = it }
+                QuietAction(
+                    if (vm.visitAsService) "✓ לרשום גם כטיפול בהיסטוריה" else "לרשום גם כטיפול בהיסטוריה",
+                    enabled = true,
+                    selected = vm.visitAsService,
+                ) { vm.visitAsService = !vm.visitAsService }
+                if (vm.visitAsService) {
+                    FieldCaption("סוג הטיפול")
+                    ServiceKind.entries.forEach { kind ->
+                        QuietAction(kind.labelHe, enabled = true, selected = vm.visitServiceKind == kind) { vm.visitServiceKind = kind }
+                    }
+                    val unit = ui.care?.intervalUnit ?: IntervalUnit.KM
+                    Field("${unit.labelHe} עכשיו (לא חובה)", vm.visitReadingText, number = true, ltr = true) { vm.visitReadingText = it }
+                    Note("הטיפול יירשם בתאריך של היום, עם שם המוסך, ויקושר להשוואת לפני/אחרי. התזכורות יתחילו להיספר ממנו.")
+                }
                 PairRow(
                     left = { PrimaryAction("סגור והשווה", enabled = ui.busyHe == null) { vm.submitVisit() } },
                     right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelVisitForm() } },
@@ -829,6 +844,7 @@ private fun VisitCard(visit: VisitView, vm: DoctorViewModel) {
             if (visit.warning) Banner(visit.statusHe) else Note(visit.statusHe)
             StateLine("מתוכנן", visit.plannedWorkHe)
             visit.reportedWorkHe?.let { StateLine("לפי המוסך נעשה", it) }
+            visit.serviceHe?.let { Note(it) }
             visit.summaryHe.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = Tone.Soft) }
             if (visit.newCodes.isNotEmpty()) {
                 FieldCaption("קודים חדשים אחרי המוסך")
@@ -1078,6 +1094,16 @@ private fun ServiceHistory(ui: DoctorUi, vm: DoctorViewModel) {
                         record.noteHe.takeIf { it.isNotBlank() },
                     )
                     if (details.isNotEmpty()) Note(details.joinToString(" · "))
+                    record.visitId?.let { id ->
+                        val visit = ui.visits.firstOrNull { it.id == id }
+                        Note(
+                            when {
+                                visit == null -> "נרשם מביקור לפני/אחרי שכבר לא שמור."
+                                visit.warning -> "מקושר לביקור לפני/אחרי: יש הבדלים שכדאי לברר עם המוסך."
+                                else -> "מקושר לביקור לפני/אחרי: לא נמצאו הבדלים חשודים."
+                            },
+                        )
+                    }
                     val confirming = vm.confirmDeleteService == record.id
                     TextButton(onClick = { vm.removeService(record.id) }, enabled = ui.busyHe == null) {
                         Text(
@@ -1087,6 +1113,58 @@ private fun ServiceHistory(ui: DoctorUi, vm: DoctorViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+private data class ServiceSearch(val labelHe: String, val query: String)
+
+/**
+ * Opens the phone's map app with a nearby search. No listings of our own and no paid
+ * placement: results come from the map app.
+ */
+@Composable
+private fun FindServicePanel(make: String) {
+    val context = LocalContext.current
+    val searches = buildList {
+        add(ServiceSearch("מוסך", "מוסך"))
+        if (make.isNotBlank()) add(ServiceSearch("מרכז שירות $make", "מרכז שירות $make"))
+        add(ServiceSearch("מרכז שירות", "מרכז שירות רכב"))
+        add(ServiceSearch("חשמלאי רכב", "חשמלאי רכב"))
+        add(ServiceSearch("פנצ׳רייה וצמיגים", "פנצריה צמיגים"))
+        add(ServiceSearch("פחחות וצבע", "פחחות וצבע רכב"))
+        add(ServiceSearch("מיזוג אוויר לרכב", "מיזוג אוויר לרכב"))
+        add(ServiceSearch("מכון רישוי (טסט)", "מכון רישוי רכב"))
+        add(ServiceSearch("גרר", "גרר רכב"))
+    }
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("חיפוש בעלי מקצוע בסביבה")
+            Note("נפתח באפליקציית המפות שבטלפון. התוצאות שם; לפני ביקור: סריקה ופתיחת ביקור.")
+            searches.chunked(2).forEach { pair ->
+                PairRow(
+                    left = { QuietAction(pair[0].labelHe, enabled = true, selected = false) { openMapSearch(context, pair[0].query) } },
+                    right = {
+                        pair.getOrNull(1)?.let { s ->
+                            QuietAction(s.labelHe, enabled = true, selected = false) { openMapSearch(context, s.query) }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun openMapSearch(context: android.content.Context, query: String) {
+    val geo = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query)))
+    try {
+        context.startActivity(geo)
+    } catch (_: android.content.ActivityNotFoundException) {
+        val web = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=" + android.net.Uri.encode(query))
+        try {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, web))
+        } catch (_: android.content.ActivityNotFoundException) {
+            // No map app and no browser: nothing to open.
         }
     }
 }

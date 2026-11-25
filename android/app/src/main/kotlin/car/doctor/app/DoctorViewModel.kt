@@ -1,6 +1,7 @@
 package car.doctor.app
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.ServiceDraft
 import car.doctor.core.care.ServiceRecord
 import car.doctor.core.care.IntervalUnit
 import car.doctor.core.care.ServiceKind
@@ -103,6 +104,8 @@ data class DoctorUi(
     val currentReading: Int? = null,
     /** Every recorded service of the selected car, newest first. */
     val services: List<ServiceRecord> = emptyList(),
+    /** Make of the selected car, for "service center for <make>" searches. */
+    val make: String = "",
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -450,9 +453,19 @@ class DoctorViewModel(
     var plannedWork by mutableStateOf("")
     var reportedWork by mutableStateOf("")
 
+    /** When closing a visit: also save it as a service in the history. */
+    var visitAsService by mutableStateOf(true)
+    var visitServiceKind by mutableStateOf(ServiceKind.PERIODIC)
+    var visitReadingText by mutableStateOf("")
+
     fun openVisitForm(form: VisitForm) {
         visitForm = form
-        if (form == VisitForm.FINISH) reportedWork = ""
+        if (form == VisitForm.FINISH) {
+            reportedWork = ""
+            visitAsService = true
+            visitServiceKind = ServiceKind.PERIODIC
+            visitReadingText = bench.currentReading()?.toString().orEmpty()
+        }
     }
 
     fun cancelVisitForm() {
@@ -464,10 +477,16 @@ class DoctorViewModel(
         val name = garageName
         val plan = plannedWork
         val reported = reportedWork
+        val readingText = visitReadingText.replace(",", "").trim()
+        val draft = if (form == VisitForm.FINISH && visitAsService) {
+            ServiceDraft(visitServiceKind, readingText.takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: -1 })
+        } else {
+            null
+        }
         act(if (form == VisitForm.FINISH) "משווה לסריקה שלפני המוסך…" else null) {
             val effect = when (form) {
                 VisitForm.START -> bench.startGarageVisit(name, plan)
-                VisitForm.FINISH -> bench.finishGarageVisit(reported)
+                VisitForm.FINISH -> bench.finishGarageVisit(reported, draft)
                 VisitForm.NONE -> return@act null
             }
             noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
@@ -620,7 +639,8 @@ class DoctorViewModel(
         val snap = bench.snapshot()
         val sessions = bench.sessions()
         val history = sessions.map(SessionPresenter::present)
-        val visits = bench.visits().map { VisitPresenter.present(it, sessions) }
+        val services = bench.services()
+        val visits = bench.visits().map { VisitPresenter.present(it, sessions, services) }
         if (openId != null && history.none { it.id == openId }) openId = null
         val vehicle = snap.vehicle
         val open = history.firstOrNull { it.id == openId }
@@ -670,6 +690,7 @@ class DoctorViewModel(
             care = bench.carePlan(),
             currentReading = bench.currentReading(),
             services = bench.services(),
+            make = vehicle?.make.orEmpty(),
         )
     }
 
