@@ -1,5 +1,7 @@
 package car.doctor.simulation
 
+import car.doctor.core.model.FreezeFrame
+import car.doctor.core.model.DeepExtras
 import car.doctor.core.adapter.AdapterCapability
 import car.doctor.core.adapter.AdapterInfo
 import car.doctor.core.adapter.ObdAdapter
@@ -120,6 +122,36 @@ class MockObdAdapter(
             is ProtocolOutcome.Ok -> ClearOutcome.Cleared
             is ProtocolOutcome.Failed -> ClearOutcome.Refused(ENGINE_RUNNING_HE)
         }
+    }
+
+    override fun readDeepExtras(readAt: String): DeepExtras? {
+        val caps = Obd2Profile.deep
+        val vin = (Obd2.requestVin(caps) as? ProtocolOutcome.Ok)?.value
+            ?.let { (ask(it) as? Read.Value)?.value }
+            ?.let { (Obd2.decodeVin(it) as? ProtocolOutcome.Ok)?.value }
+        val permanent = (Obd2.requestPermanentCodes(caps) as? ProtocolOutcome.Ok)?.value
+            ?.let { (ask(it) as? Read.Value)?.value }
+            ?.let { (Obd2.decodePermanentCodes(it) as? ProtocolOutcome.Ok)?.value }
+            .orEmpty()
+            .map { code ->
+                val known = describeDtc(code.code)
+                Dtc(code.code, DtcStatus.PERMANENT, EcuId.ENGINE, known.descriptionHe, known.severity, readAt)
+            }
+        return DeepExtras(vin = vin, freezeFrame = readFreezeFrame(readAt), permanentCodes = permanent, extraPids = emptyList())
+    }
+
+    private fun readFreezeFrame(readAt: String): FreezeFrame? {
+        val caps = Obd2Profile.deep
+        val codeRequest = (Obd2.requestFreezeFrame(ObdPid.FREEZE_DTC, caps) as? ProtocolOutcome.Ok)?.value ?: return null
+        val codeResponse = (ask(codeRequest) as? Read.Value)?.value ?: return null
+        val code = (Obd2.decodeFreezeFrameDtc(codeResponse) as? ProtocolOutcome.Ok)?.value ?: return null
+        val values = FREEZE_PIDS.mapNotNull { (pid, id, nameHe, unit) ->
+            val request = (Obd2.requestFreezeFrame(pid, caps) as? ProtocolOutcome.Ok)?.value ?: return@mapNotNull null
+            val response = (ask(request) as? Read.Value)?.value ?: return@mapNotNull null
+            val reading = (Obd2.decodeFreezeFrame(response) as? ProtocolOutcome.Ok)?.value ?: return@mapNotNull null
+            sample(id, nameHe, reading.value, unit, EcuId.ENGINE, true, true, readAt)
+        }
+        return FreezeFrame(code = code, values = values)
     }
 
     /** Checks on the (simulated) car itself: engine stopped, vehicle still. */
@@ -480,6 +512,15 @@ private fun unavailable(
 )
 
 private fun round1(value: Double): Double = round(value * 10.0) / 10.0
+
+private data class FreezeSpec(val pid: ObdPid, val id: String, val nameHe: String, val unit: String)
+
+private val FREEZE_PIDS = listOf(
+    FreezeSpec(ObdPid.ENGINE_RPM, "ff_rpm", "סל״ד", "rpm"),
+    FreezeSpec(ObdPid.VEHICLE_SPEED, "ff_speed", "מהירות", "קמ״ש"),
+    FreezeSpec(ObdPid.COOLANT_TEMP, "ff_coolant", "טמפרטורת קירור", "°C"),
+    FreezeSpec(ObdPid.THROTTLE_POSITION, "ff_throttle", "מצערת", "%"),
+)
 
 private const val ENGINE_RUNNING_HE =
     "המנוע פועל. מכבים את המנוע, משאירים את ההצתה במצב ON, ואז מוחקים. רוב היחידות מסרבות למחוק כשהמנוע מסתובב."

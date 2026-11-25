@@ -351,6 +351,7 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
         right = { QuietAction("נתק", ui.canDisconnect, false) { vm.disconnect() } },
     )
     IgnitionAction("סריקה מהירה", "קודי תקלה · מוכנות · חיישנים", enabled = ui.canScan) { vm.scan() }
+    QuietAction("בדיקה מעמיקה · VIN · תמונת מצב · קודים קבועים", enabled = ui.canScan, selected = false) { vm.deepScan() }
     if (ui.canClear) {
         CautionAction("מחיקת קודי תקלה…", enabled = true) { vm.startClear() }
     }
@@ -538,6 +539,11 @@ private fun SessionBody(session: SessionView) {
         Text("אין ממצאים על הנתונים שנקראו בסריקה הזו.", style = MaterialTheme.typography.bodyMedium)
     } else {
         session.findings.forEach { FindingBlock(it) }
+    }
+    if (session.deepNotesHe.isNotEmpty() || session.freezeFrame.isNotEmpty()) {
+        ResultSection("בדיקה מעמיקה")
+        session.deepNotesHe.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        session.freezeFrame.forEach { SampleBlock(it) }
     }
     ResultSection("קודים")
     session.codesNoteHe?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }

@@ -26,7 +26,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** A car behind an ELM327, at the text level. Unknown commands get "?". */
-private class FakeCar(private val replies: Map<String, String>) : ObdTransport {
+internal class FakeCar(private val replies: Map<String, String>) : ObdTransport {
     override val transportType = "fake"
     val sent = mutableListOf<String>()
     private var connected = false

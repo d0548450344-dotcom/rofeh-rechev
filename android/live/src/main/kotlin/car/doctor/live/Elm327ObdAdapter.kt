@@ -1,5 +1,9 @@
 package car.doctor.live
 
+import car.doctor.protocol.ProtocolCapabilities
+import car.doctor.protocol.Obd2Profile
+import car.doctor.core.model.FreezeFrame
+import car.doctor.core.model.DeepExtras
 import car.doctor.core.adapter.AdapterCapability
 import car.doctor.core.adapter.AdapterInfo
 import car.doctor.core.adapter.ObdAdapter
@@ -126,6 +130,68 @@ class Elm327ObdAdapter(
         protocol.disconnect()
     }
 
+    /**
+     * Deep-scan reads. Read-only services only (02, 09, 0A and extra 01 PIDs).
+     * Anything the car does not answer is simply left out; a dead link returns null.
+     */
+    override fun readDeepExtras(readAt: String): DeepExtras? {
+        val caps = Obd2Profile.deep
+        val vin = when (val r = askDeep(Obd2.requestVin(caps))) {
+            is Step.Stop -> if (isSoft(r.failure)) null else return null
+            is Step.Value -> r.value?.let { (Obd2.decodeVin(it) as? ProtocolOutcome.Ok)?.value }
+        }
+        val permanent = when (val r = askDeep(Obd2.requestPermanentCodes(caps))) {
+            is Step.Stop -> if (isSoft(r.failure)) emptyList() else return null
+            is Step.Value -> r.value?.let { (Obd2.decodePermanentCodes(it) as? ProtocolOutcome.Ok)?.value }.orEmpty()
+        }.map { code ->
+            val known = describeDtc(code.code)
+            Dtc(code.code, DtcStatus.PERMANENT, EcuId.ENGINE, known.descriptionHe, known.severity, readAt)
+        }
+        val freeze = readFreezeFrame(readAt) ?: return null
+        val ice = vehicle.fuel != Fuel.ELECTRIC
+        val extras = mutableListOf<PidValue>()
+        for (spec in DEEP_PIDS) {
+            when (val read = readPid(spec, if (spec.engineOnly) ice else true, readAt, caps)) {
+                is Step.Stop -> return null
+                is Step.Value -> if (read.value.quality == PidQuality.VALID) extras += read.value
+            }
+        }
+        return DeepExtras(vin = vin, freezeFrame = freeze.frame, permanentCodes = permanent, extraPids = extras)
+    }
+
+    private class FreezeRead(val frame: FreezeFrame?)
+
+    /** null = link failed; FreezeRead(null) = the car keeps no freeze frame. */
+    private fun readFreezeFrame(readAt: String): FreezeRead? {
+        val caps = Obd2Profile.deep
+        val code = when (val r = askDeep(Obd2.requestFreezeFrame(ObdPid.FREEZE_DTC, caps))) {
+            is Step.Stop -> return if (isSoft(r.failure)) FreezeRead(null) else null
+            is Step.Value -> r.value?.let { (Obd2.decodeFreezeFrameDtc(it) as? ProtocolOutcome.Ok)?.value }
+        } ?: return FreezeRead(null)
+        val values = mutableListOf<PidValue>()
+        for (spec in FREEZE_PIDS) {
+            when (val r = askDeep(Obd2.requestFreezeFrame(spec.pid, caps))) {
+                is Step.Stop -> if (!isSoft(r.failure)) return null
+                is Step.Value -> r.value?.let { (Obd2.decodeFreezeFrame(it) as? ProtocolOutcome.Ok)?.value }?.let {
+                    values += PidValue(
+                        id = spec.id, nameHe = spec.nameHe, value = round1(it.value), unit = spec.unit,
+                        ecuId = EcuId.ENGINE, quality = PidQuality.VALID, genericObd = true, expected = true, readAt = readAt,
+                    )
+                }
+            }
+        }
+        return FreezeRead(FreezeFrame(code = code, values = values))
+    }
+
+    /** Builds and sends one deep request; Value(null) when the request cannot be built. */
+    private fun askDeep(built: ProtocolOutcome<ProtocolRequest>): Step<ProtocolResponse?> {
+        val request = (built as? ProtocolOutcome.Ok)?.value ?: return Step.Value(null)
+        return when (val asked = ask(request)) {
+            is Step.Stop -> asked
+            is Step.Value -> Step.Value(asked.value)
+        }
+    }
+
     private fun snapshot(readAt: String): ScanFacts {
         val cached = memo
         if (cached != null && memoAt == readAt) return cached
@@ -184,12 +250,12 @@ class Elm327ObdAdapter(
         )
     }
 
-    private fun readPid(spec: PidSpec, expected: Boolean, readAt: String): Step<PidValue> {
+    private fun readPid(spec: PidSpec, expected: Boolean, readAt: String, caps: ProtocolCapabilities = protocol.capabilities): Step<PidValue> {
         val supported = protocol.identity?.supportedPids.orEmpty()
         if (supported.isNotEmpty() && spec.pid.code <= 0x20 && spec.pid.code !in supported) {
             return Step.Value(unavailable(spec, expected, readAt))
         }
-        val request = when (val built = Obd2.requestPid(spec.pid, protocol.capabilities)) {
+        val request = when (val built = Obd2.requestPid(spec.pid, caps)) {
             is ProtocolOutcome.Failed -> return Step.Value(unavailable(spec, expected, readAt))
             is ProtocolOutcome.Ok -> built.value
         }
@@ -329,6 +395,29 @@ class Elm327ObdAdapter(
 
     companion object {
         const val RUNNING_RPM = 400.0
+
+        private val FREEZE_PIDS = listOf(
+            PidSpec(ObdPid.ENGINE_RPM, "ff_rpm", "סל״ד", "rpm", engineOnly = true),
+            PidSpec(ObdPid.VEHICLE_SPEED, "ff_speed", "מהירות", "קמ״ש", engineOnly = false),
+            PidSpec(ObdPid.COOLANT_TEMP, "ff_coolant", "טמפרטורת קירור", "°C", engineOnly = true),
+            PidSpec(ObdPid.THROTTLE_POSITION, "ff_throttle", "מצערת", "%", engineOnly = true),
+            PidSpec(ObdPid.ENGINE_LOAD, "ff_load", "עומס מנוע", "%", engineOnly = true),
+        )
+
+        private val DEEP_PIDS = listOf(
+            PidSpec(ObdPid.ENGINE_LOAD, "load", "עומס מנוע", "%", engineOnly = true),
+            PidSpec(ObdPid.SHORT_FUEL_TRIM_B1, "stft1", "תיקון דלק קצר", "%", engineOnly = true),
+            PidSpec(ObdPid.LONG_FUEL_TRIM_B1, "ltft1", "תיקון דלק ארוך", "%", engineOnly = true),
+            PidSpec(ObdPid.MAF_RATE, "maf", "זרימת אוויר (MAF)", "g/s", engineOnly = true),
+            PidSpec(ObdPid.INTAKE_AIR_TEMP, "iat", "טמפרטורת אוויר יניקה", "°C", engineOnly = true),
+            PidSpec(ObdPid.INTAKE_MAP, "map", "לחץ סעפת יניקה", "kPa", engineOnly = true),
+            PidSpec(ObdPid.TIMING_ADVANCE, "timing", "הקדמת הצתה", "°", engineOnly = true),
+            PidSpec(ObdPid.FUEL_LEVEL, "fuel_level", "מפלס דלק", "%", engineOnly = true),
+            PidSpec(ObdPid.DISTANCE_WITH_MIL, "dist_mil", "נסועה עם נורת תקלה", "ק״מ", engineOnly = false),
+            PidSpec(ObdPid.DISTANCE_SINCE_CLEAR, "dist_clear", "נסועה מאז מחיקת קודים", "ק״מ", engineOnly = false),
+            PidSpec(ObdPid.AMBIENT_AIR_TEMP, "ambient", "טמפרטורת סביבה", "°C", engineOnly = false),
+            PidSpec(ObdPid.RUN_TIME, "run_time", "זמן מאז התנעה", "s", engineOnly = true),
+        )
 
         private val LIVE_PIDS = listOf(
             PidSpec(ObdPid.ENGINE_RPM, "rpm", "סל״ד", "rpm", engineOnly = true),

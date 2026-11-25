@@ -233,10 +233,18 @@ class DoctorViewModel(
         fuel = value
     }
 
-    fun scan() {
-        val label = if (links.source.isLive) "קורא קודים ונתונים מהרכב…" else "סורק…"
+    fun scan() = runScan(deep = false)
+
+    fun deepScan() = runScan(deep = true)
+
+    private fun runScan(deep: Boolean) {
+        val label = when {
+            deep -> "בדיקה מעמיקה: קודים, VIN, תמונת מצב ונתונים נוספים… (עד דקה)"
+            links.source.isLive -> "קורא קודים ונתונים מהרכב…"
+            else -> "סורק…"
+        }
         act(label) {
-            val effect = bench.quickScan()
+            val effect = if (deep) bench.deepScan() else bench.quickScan()
             noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
             if (effect is BenchEffect.Accepted && bench.snapshot().session == ObdSessionState.COMPLETE) {
                 openId = bench.snapshot().historyIds.firstOrNull()

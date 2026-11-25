@@ -1,5 +1,6 @@
 package car.doctor.core.session
 
+import car.doctor.core.model.DtcStatus
 import car.doctor.core.adapter.ObdAdapterFactory
 import car.doctor.core.catalog.ignitionLabel
 import car.doctor.core.machine.IgnitionMove
@@ -264,6 +265,25 @@ class VehicleBench(
     fun quickScan(): BenchEffect = scan { it }
 
     /**
+     * Quick scan plus VIN, freeze frame, permanent codes and more sensors. Slower, still
+     * read-only. Extras that the car does not answer are simply absent.
+     */
+    fun deepScan(): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        return scan { session ->
+            val extras = adapters.open(vehicle).readDeepExtras(session.finishedAt) ?: return@scan session.copy(kind = "deep")
+            session.copy(
+                kind = "deep",
+                dtcs = session.dtcs + extras.permanentCodes,
+                pids = session.pids + extras.extraPids.filter { extra -> session.pids.none { it.id == extra.id } },
+                vinRead = extras.vin,
+                vinNoteHe = extras.vin?.let { compareVin(vehicle.vin, it) } ?: session.vinNoteHe,
+                freezeFrame = extras.freezeFrame,
+            )
+        }
+    }
+
+    /**
      * Clears stored and pending codes (OBD mode 04), then immediately rescans so the user
      * sees what came back. Guards, in order:
      *  1. the user acknowledged both warnings;
@@ -280,7 +300,9 @@ class VehicleBench(
         }
         val prior = repository.sessionsFor(vehicle.id).firstOrNull { it.id == lastScanThisLink }
             ?: return rejected("סורקים קודם, כדי שהקודים יישמרו לפני המחיקה.")
-        if (prior.dtcs.isEmpty()) return rejected("אין קודים למחוק בסריקה האחרונה.")
+        if (prior.dtcs.none { it.status != DtcStatus.PERMANENT }) {
+            return rejected("אין קודים שאפשר למחוק בסריקה האחרונה. קוד קבוע נמחק רק כשהרכב עצמו מאשר שהתקלה תוקנה.")
+        }
 
         when (val outcome = adapters.open(vehicle).clearCodes(clock.now())) {
             is ClearOutcome.Refused -> return rejected(outcome.messageHe)
@@ -290,8 +312,17 @@ class VehicleBench(
             }
             ClearOutcome.Cleared -> Unit
         }
-        val cleared = prior.dtcs.map { it.code }.distinct()
+        val cleared = prior.dtcs.filter { it.status != DtcStatus.PERMANENT }.map { it.code }.distinct()
         return scan { it.copy(kind = "post-clear", clearedCodes = cleared, clearedFromSessionId = prior.id) }
+    }
+
+    private fun compareVin(typed: String, read: String): String {
+        val clean = typed.trim().uppercase()
+        return when {
+            clean.isEmpty() -> "VIN נקרא מהרכב: $read. בפרופיל לא הוזן VIN."
+            clean == read -> "VIN שנקרא מהרכב תואם ל-VIN שבפרופיל."
+            else -> "VIN שנקרא מהרכב ($read) שונה מזה שבפרופיל ($clean). ייתכן שמחשב המנוע הוחלף, או שהפרופיל שגוי."
+        }
     }
 
     private fun scan(decorate: (DiagnosticSession) -> DiagnosticSession): BenchEffect {
@@ -391,7 +422,7 @@ class VehicleBench(
     private fun lastScanHadCodes(): Boolean {
         val id = lastScanThisLink ?: return false
         val vehicle = selected() ?: return false
-        return repository.sessionsFor(vehicle.id).firstOrNull { it.id == id }?.dtcs?.isNotEmpty() == true
+        return repository.sessionsFor(vehicle.id).firstOrNull { it.id == id }?.dtcs?.any { it.status != DtcStatus.PERMANENT } == true
     }
 
     private fun buildSnapshot(): BenchSnapshot {

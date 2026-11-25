@@ -27,6 +27,13 @@ object MockEcu {
             0x01 -> currentData(scene, head)
             0x03 -> ObdFixtures.stored(scene.stored)
             0x07 -> ObdFixtures.pending(scene.pending)
+            0x0A -> ObdFixtures.permanent(emptyList())
+            0x09 -> if (head == 0x02) {
+                ObdFixtures.frame(0x49, listOf(0x02, 0x01) + simulatedVin(vehicle).map { it.code })
+            } else {
+                ObdFixtures.negative(0x09)
+            }
+            0x02 -> freezeFrame(scene, head)
             // Mode 04: like real ECUs, refuse while the engine turns (NRC 0x22). The injected
             // fault stays, so its code comes back on the next scan, exactly as in a real car.
             0x04 -> if (scene.rpm > 0.0 || scene.speed > 0.0) {
@@ -37,6 +44,31 @@ object MockEcu {
             SimChannel.SERVICE -> channel(scene, head)
             else -> ObdFixtures.negative(frame.service)
         }
+    }
+
+    /** The typed VIN when it is a valid one, otherwise a fixed demo VIN. */
+    private fun simulatedVin(vehicle: Vehicle): String {
+        val typed = vehicle.vin.trim().uppercase()
+        return if (Regex("^[A-HJ-NPR-Z0-9]{17}$").matches(typed)) typed else "JT2AE92E000000001"
+    }
+
+    /** Mode 02 frame 0. A frame exists only while a stored code exists, as in a real ECU. */
+    private fun freezeFrame(scene: Scene, pid: Int?): ByteArray {
+        val first = scene.stored.firstOrNull()
+        if (pid == null) return ObdFixtures.negative(0x02)
+        if (pid == 0x02) {
+            val code = first?.let(ObdFixtures::codeBytes) ?: listOf(0, 0)
+            return ObdFixtures.frame(0x42, listOf(0x02, 0x00) + code)
+        }
+        if (first == null) return ObdFixtures.negative(0x02)
+        val data = when (pid) {
+            ObdPid.ENGINE_RPM.code -> ObdFixtures.rpmBytes(scene.rpm)
+            ObdPid.COOLANT_TEMP.code -> listOf((scene.coolant + 40).toInt().coerceIn(0, 255))
+            ObdPid.VEHICLE_SPEED.code -> listOf(scene.speed.toInt().coerceIn(0, 255))
+            ObdPid.THROTTLE_POSITION.code -> listOf((scene.throttle * 255 / 100).toInt().coerceIn(0, 255))
+            else -> return ObdFixtures.negative(0x02)
+        }
+        return ObdFixtures.frame(0x42, listOf(pid, 0x00) + data)
     }
 
     private fun currentData(scene: Scene, pid: Int?): ByteArray {

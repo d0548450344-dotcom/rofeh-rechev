@@ -22,6 +22,21 @@ enum class ObdPid(val code: Int, val label: String, val unit: String, val byteCo
     VEHICLE_SPEED(0x0D, "Vehicle Speed", "km/h", 1),
     THROTTLE_POSITION(0x11, "Throttle Position", "%", 1),
     CONTROL_MODULE_VOLTAGE(0x42, "Control Module Voltage", "V", 2),
+
+    // Deep scan (SAE J1979 standard formulas)
+    FREEZE_DTC(0x02, "DTC that caused freeze frame", "dtc", 2),
+    ENGINE_LOAD(0x04, "Calculated Engine Load", "%", 1),
+    SHORT_FUEL_TRIM_B1(0x06, "Short Term Fuel Trim Bank 1", "%", 1),
+    LONG_FUEL_TRIM_B1(0x07, "Long Term Fuel Trim Bank 1", "%", 1),
+    INTAKE_MAP(0x0B, "Intake Manifold Pressure", "kPa", 1),
+    TIMING_ADVANCE(0x0E, "Timing Advance", "°", 1),
+    INTAKE_AIR_TEMP(0x0F, "Intake Air Temperature", "°C", 1),
+    MAF_RATE(0x10, "MAF Air Flow Rate", "g/s", 2),
+    RUN_TIME(0x1F, "Run Time Since Engine Start", "s", 2),
+    DISTANCE_WITH_MIL(0x21, "Distance Traveled With MIL On", "km", 2),
+    FUEL_LEVEL(0x2F, "Fuel Tank Level", "%", 1),
+    DISTANCE_SINCE_CLEAR(0x31, "Distance Since Codes Cleared", "km", 2),
+    AMBIENT_AIR_TEMP(0x46, "Ambient Air Temperature", "°C", 1),
     ;
 
     companion object {
@@ -35,6 +50,13 @@ enum class PidFormula(val expression: String) {
     COOLANT_TEMP("A-40"),
     THROTTLE_POSITION("A*100/255"),
     CONTROL_MODULE_VOLTAGE("((A*256)+B)/1000"),
+    PERCENT("A*100/255"),
+    FUEL_TRIM("(A-128)*100/128"),
+    RAW_A("A"),
+    TEMPERATURE("A-40"),
+    TIMING("A/2-64"),
+    MAF("((A*256)+B)/100"),
+    WORD("(A*256)+B"),
 }
 
 data class PidReading(
@@ -103,6 +125,26 @@ val WRITE_AND_FLASH_SERVICES: Set<Int> = setOf(
     0x85, // control DTC setting
 )
 
+/** Value and formula for one PID's data bytes (SAE J1979). */
+internal fun decodeValue(pid: ObdPid, used: List<Int>): Pair<Double, PidFormula> {
+    fun word() = ((used[0] shl 8) + used[1]).toDouble()
+    return when (pid) {
+        ObdPid.ENGINE_RPM -> word() / 4.0 to PidFormula.ENGINE_RPM
+        ObdPid.VEHICLE_SPEED -> used[0].toDouble() to PidFormula.VEHICLE_SPEED
+        ObdPid.COOLANT_TEMP -> used[0] - 40.0 to PidFormula.COOLANT_TEMP
+        ObdPid.CONTROL_MODULE_VOLTAGE -> word() / 1000.0 to PidFormula.CONTROL_MODULE_VOLTAGE
+        ObdPid.THROTTLE_POSITION -> used[0] * 100.0 / 255.0 to PidFormula.THROTTLE_POSITION
+        ObdPid.ENGINE_LOAD, ObdPid.FUEL_LEVEL -> used[0] * 100.0 / 255.0 to PidFormula.PERCENT
+        ObdPid.SHORT_FUEL_TRIM_B1, ObdPid.LONG_FUEL_TRIM_B1 -> (used[0] - 128) * 100.0 / 128.0 to PidFormula.FUEL_TRIM
+        ObdPid.INTAKE_MAP -> used[0].toDouble() to PidFormula.RAW_A
+        ObdPid.TIMING_ADVANCE -> used[0] / 2.0 - 64.0 to PidFormula.TIMING
+        ObdPid.INTAKE_AIR_TEMP, ObdPid.AMBIENT_AIR_TEMP -> used[0] - 40.0 to PidFormula.TEMPERATURE
+        ObdPid.MAF_RATE -> word() / 100.0 to PidFormula.MAF
+        ObdPid.RUN_TIME, ObdPid.DISTANCE_WITH_MIL, ObdPid.DISTANCE_SINCE_CLEAR -> word() to PidFormula.WORD
+        ObdPid.MONITOR_STATUS, ObdPid.FREEZE_DTC -> error("not a measured value")
+    }
+}
+
 object Obd2Profile {
     val foundation: ProtocolCapabilities = ProtocolCapabilities(
         supportsObd2 = true,
@@ -121,6 +163,15 @@ object Obd2Profile {
         ),
         supportsDtc = true,
         supportsReadiness = true,
+    )
+
+    /**
+     * Deep scan: freeze frame (02), vehicle info / VIN (09), permanent codes (0A) and more
+     * live sensors. All read-only.
+     */
+    val deep: ProtocolCapabilities = foundation.copy(
+        supportedModes = foundation.supportedModes + setOf(ObdMode.FREEZE_FRAME, ObdMode.VEHICLE_INFO, ObdMode.PERMANENT_CODES),
+        supportedPids = ObdPid.entries.toSet(),
     )
 
     /** Foundation plus mode 04. Still no write, flash or security services. */
@@ -160,6 +211,71 @@ object Obd2 {
         return requestPid(ObdPid.MONITOR_STATUS, capabilities)
     }
 
+    /** Mode 02, frame 0: the value a PID had when the first stored code was set. */
+    fun requestFreezeFrame(pid: ObdPid, capabilities: ProtocolCapabilities): ProtocolOutcome<ProtocolRequest> {
+        if (ObdMode.FREEZE_FRAME !in capabilities.supportedModes) return unsupported("freeze-frame")
+        if (pid == ObdPid.MONITOR_STATUS) return unsupported("pid")
+        return ProtocolOutcome.Ok(ProtocolRequest(ObdMode.FREEZE_FRAME.service, listOf(pid.code, 0x00)))
+    }
+
+    /** Mode 02 answer: [pid, frame, data...]. Null value for the "no freeze frame" DTC 0000. */
+    fun decodeFreezeFrame(response: ProtocolResponse): ProtocolOutcome<PidReading> {
+        negative(response)?.let { return ProtocolOutcome.Failed(ProtocolFailure.FromProtocol(it)) }
+        if (response.service != ObdMode.FREEZE_FRAME.service + POSITIVE_OFFSET) {
+            return protocol(ProtocolError.UnexpectedResponse("service"))
+        }
+        val pid = response.payload.getOrNull(0)?.let(ObdPid::fromCode) ?: return protocol(ProtocolError.Undecodable("pid"))
+        if (pid == ObdPid.FREEZE_DTC || pid == ObdPid.MONITOR_STATUS) return protocol(ProtocolError.UnexpectedResponse("pid"))
+        val data = response.payload.drop(2)
+        if (data.size < pid.byteCount) return protocol(ProtocolError.MissingPayload("pid-data"))
+        val used = data.take(pid.byteCount)
+        val (value, formula) = decodeValue(pid, used)
+        return ProtocolOutcome.Ok(PidReading(pid, ObdMode.FREEZE_FRAME, used, value, pid.unit, formula))
+    }
+
+    /** Mode 02 PID 02: which code froze the frame. Null when no frame is stored (0000). */
+    fun decodeFreezeFrameDtc(response: ProtocolResponse): ProtocolOutcome<String?> {
+        negative(response)?.let { return ProtocolOutcome.Failed(ProtocolFailure.FromProtocol(it)) }
+        if (response.service != ObdMode.FREEZE_FRAME.service + POSITIVE_OFFSET || response.payload.getOrNull(0) != 0x02) {
+            return protocol(ProtocolError.UnexpectedResponse("service"))
+        }
+        val data = response.payload.drop(2)
+        if (data.size < 2) return protocol(ProtocolError.MissingPayload("freeze-dtc"))
+        if (data[0] == 0 && data[1] == 0) return ProtocolOutcome.Ok(null)
+        return ProtocolOutcome.Ok(formatCode(data[0], data[1]))
+    }
+
+    /** Mode 09 PID 02: the VIN the engine ECU reports. */
+    fun requestVin(capabilities: ProtocolCapabilities): ProtocolOutcome<ProtocolRequest> {
+        if (ObdMode.VEHICLE_INFO !in capabilities.supportedModes) return unsupported("vehicle-info")
+        return ProtocolOutcome.Ok(ProtocolRequest(ObdMode.VEHICLE_INFO.service, listOf(0x02)))
+    }
+
+    /**
+     * Keeps the 17 VIN characters from a mode 09 answer, whether it came as one CAN message
+     * (with a count byte) or as several K-line lines (with sequence bytes). Null if what
+     * remains is not a plausible VIN.
+     */
+    fun decodeVin(response: ProtocolResponse): ProtocolOutcome<String?> {
+        negative(response)?.let { return ProtocolOutcome.Failed(ProtocolFailure.FromProtocol(it)) }
+        if (response.service != ObdMode.VEHICLE_INFO.service + POSITIVE_OFFSET) {
+            return protocol(ProtocolError.UnexpectedResponse("service"))
+        }
+        val chars = response.payload.drop(1)
+            .filter { it in 0x30..0x39 || it in 0x41..0x5A }
+            .map { it.toChar() }
+            .joinToString("")
+        val vin = chars.takeLast(17)
+        return ProtocolOutcome.Ok(vin.takeIf { VIN.matches(it) })
+    }
+
+    fun requestPermanentCodes(capabilities: ProtocolCapabilities): ProtocolOutcome<ProtocolRequest> {
+        if (ObdMode.PERMANENT_CODES !in capabilities.supportedModes) return unsupported("permanent-codes")
+        return ProtocolOutcome.Ok(ProtocolRequest(ObdMode.PERMANENT_CODES.service))
+    }
+
+    private val VIN = Regex("^[A-HJ-NPR-Z0-9]{17}$")
+
     /**
      * Mode 04: clear stored and pending codes, freeze frame and readiness.
      * Only a profile that explicitly lists [ObdMode.CLEAR_CODES] may build it, and the
@@ -197,22 +313,8 @@ object Obd2 {
         val data = response.payload.drop(1)
         if (data.size < pid.byteCount) return protocol(ProtocolError.MissingPayload("pid-data"))
         val used = data.take(pid.byteCount)
-        val value = when (pid) {
-            ObdPid.ENGINE_RPM -> ((used[0] shl 8) + used[1]) / 4.0
-            ObdPid.VEHICLE_SPEED -> used[0].toDouble()
-            ObdPid.COOLANT_TEMP -> used[0] - 40.0
-            ObdPid.CONTROL_MODULE_VOLTAGE -> ((used[0] shl 8) + used[1]) / 1000.0
-            ObdPid.THROTTLE_POSITION -> used[0] * 100.0 / 255.0
-            ObdPid.MONITOR_STATUS -> error("handled above")
-        }
-        val formula = when (pid) {
-            ObdPid.ENGINE_RPM -> PidFormula.ENGINE_RPM
-            ObdPid.VEHICLE_SPEED -> PidFormula.VEHICLE_SPEED
-            ObdPid.COOLANT_TEMP -> PidFormula.COOLANT_TEMP
-            ObdPid.CONTROL_MODULE_VOLTAGE -> PidFormula.CONTROL_MODULE_VOLTAGE
-            ObdPid.THROTTLE_POSITION -> PidFormula.THROTTLE_POSITION
-            ObdPid.MONITOR_STATUS -> error("handled above")
-        }
+        if (pid == ObdPid.FREEZE_DTC) return protocol(ProtocolError.UnexpectedResponse("freeze-dtc-pid"))
+        val (value, formula) = decodeValue(pid, used)
         return ProtocolOutcome.Ok(
             PidReading(
                 pid = pid,
@@ -230,6 +332,10 @@ object Obd2 {
 
     fun decodePendingCodes(response: ProtocolResponse): ProtocolOutcome<List<TroubleCode>> =
         decodeCodes(response, ObdMode.PENDING_CODES)
+
+    /** Mode 0A: codes only the car itself can erase, after it confirms the repair. */
+    fun decodePermanentCodes(response: ProtocolResponse): ProtocolOutcome<List<TroubleCode>> =
+        decodeCodes(response, ObdMode.PERMANENT_CODES)
 
     fun decodeReadiness(response: ProtocolResponse): ProtocolOutcome<ReadinessReport> {
         negative(response)?.let { return ProtocolOutcome.Failed(ProtocolFailure.FromProtocol(it)) }

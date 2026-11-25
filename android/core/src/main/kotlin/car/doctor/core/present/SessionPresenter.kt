@@ -69,6 +69,9 @@ data class SessionView(
     val monitorsNoteHe: String?,
     /** Set on the verification scan right after clearing codes. */
     val clearNoteHe: String? = null,
+    /** Deep scan: VIN line, comparison with the typed VIN, freeze-frame heading. */
+    val deepNotesHe: List<String> = emptyList(),
+    val freezeFrame: List<SampleLine> = emptyList(),
 )
 
 /**
@@ -79,6 +82,8 @@ object SessionPresenter {
     fun present(session: DiagnosticSession): SessionView {
         val headline = if (session.clearedCodes.isNotEmpty()) {
             "סריקת אימות אחרי מחיקת קודים."
+        } else if (session.kind == "deep" && session.findings.isEmpty()) {
+            "בדיקה מעמיקה: לא נמצא ממצא בנתונים שנקראו."
         } else if (session.findings.isEmpty()) {
             CLEAR_SCAN_HE
         } else {
@@ -86,7 +91,38 @@ object SessionPresenter {
         }
         val checked = session.ecus.any { it.access == EcuAccess.CHECKED }
         val failed = session.ecus.any { it.access == EcuAccess.COMM_ERROR }
-        return buildView(session, headline, checked, failed).copy(clearNoteHe = clearNote(session))
+        return buildView(session, headline, checked, failed).copy(
+            clearNoteHe = clearNote(session),
+            deepNotesHe = deepNotes(session),
+            freezeFrame = session.freezeFrame?.values.orEmpty().map(::sample),
+        )
+    }
+
+    /** Only for deep scans. States what the car reported; never guesses a missing value. */
+    fun deepNotes(session: DiagnosticSession): List<String> {
+        if (session.kind != "deep") return emptyList()
+        val notes = mutableListOf<String>()
+        notes += session.vinRead?.let { "VIN שהרכב דיווח: $it" } ?: "הרכב לא החזיר VIN (רכבים ישנים ורכב מדומה לא תמיד מחזירים)."
+        val permanent = session.dtcs.filter { it.status == car.doctor.core.model.DtcStatus.PERMANENT }
+        if (permanent.isNotEmpty()) {
+            notes += "קודים קבועים: ${permanent.joinToString(", ") { it.code }}. מחיקה לא מסירה אותם; הרכב מוחק אותם בעצמו אחרי שווידא שהתקלה תוקנה."
+        }
+        when (val frame = session.freezeFrame) {
+            null -> notes += "אין freeze frame שמור (נשמר רק כשקוד שמור נרשם)."
+            else -> notes += "freeze frame: מצב המנוע ברגע שנרשם ${frame.code ?: "קוד"}. עוזר להבין באילו תנאים התקלה קרתה."
+        }
+        return notes
+    }
+
+    private fun sample(pid: car.doctor.core.model.PidValue): SampleLine {
+        val missing = pid.quality != PidQuality.VALID || pid.value == null
+        return SampleLine(
+            nameHe = pid.nameHe,
+            valueHe = if (missing) "לא זמין" else formatSample(pid.value!!),
+            unit = if (missing) "" else pid.unit,
+            ecuHe = EcuCatalog.get(pid.ecuId).nameHe,
+            qualityHe = if (missing) "לא זמין" else "נקרא",
+        )
     }
 
     /** What clearing did, in plain words. Clearing hides a code; it never fixes the cause. */

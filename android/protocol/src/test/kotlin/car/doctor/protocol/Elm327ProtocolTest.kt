@@ -305,6 +305,67 @@ class Elm327ProtocolTest {
     }
 
     @Test
+    fun `VIN over CAN arrives as one multi-frame message`() {
+        val elm = FakeElm().withCar().apply {
+            reply("0902", "014\r0: 49 02 01 31 47 31\r1: 4A 43 35 34 34 34 52\r2: 37 32 35 32 33 36 37")
+        }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val request = Obd2.requestVin(Obd2Profile.deep).value()
+        assertEquals("1G1JC5444R7252367", Obd2.decodeVin(protocol.request(request).value()).value())
+    }
+
+    @Test
+    fun `VIN over K-line arrives as five lines with sequence numbers`() {
+        val elm = FakeElm().withCar().apply {
+            reply(
+                "0902",
+                "49 02 01 00 00 00 31\r49 02 02 47 31 4A 43\r49 02 03 35 34 34 34\r49 02 04 52 37 32 35\r49 02 05 32 33 36 37",
+            )
+        }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val request = Obd2.requestVin(Obd2Profile.deep).value()
+        assertEquals("1G1JC5444R7252367", Obd2.decodeVin(protocol.request(request).value()).value())
+    }
+
+    @Test
+    fun `freeze frame reads the code that froze it and its values`() {
+        val elm = FakeElm().withCar().apply {
+            reply("020200", "42 02 00 03 01")
+            reply("020C00", "42 0C 00 1A F8")
+            reply("020500", "42 05 00 7B")
+        }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val caps = Obd2Profile.deep
+        val code = Obd2.decodeFreezeFrameDtc(protocol.request(Obd2.requestFreezeFrame(ObdPid.FREEZE_DTC, caps).value()).value()).value()
+        assertEquals("P0301", code)
+        val rpm = Obd2.decodeFreezeFrame(protocol.request(Obd2.requestFreezeFrame(ObdPid.ENGINE_RPM, caps).value()).value()).value()
+        assertEquals(1726.0, rpm.value, 0.01)
+        val coolant = Obd2.decodeFreezeFrame(protocol.request(Obd2.requestFreezeFrame(ObdPid.COOLANT_TEMP, caps).value()).value()).value()
+        assertEquals(83.0, coolant.value, 0.01)
+    }
+
+    @Test
+    fun `permanent codes and deep sensors decode`() {
+        val elm = FakeElm().withCar().apply {
+            reply("0A", "4A 01 04 20")
+            reply("0106", "41 06 8A")
+            reply("0110", "41 10 01 F4")
+            reply("0131", "41 31 00 64")
+        }
+        val protocol = protocolOver(elm)
+        protocol.connect()
+        val permanent = Obd2.decodePermanentCodes(protocol.request(Obd2.requestPermanentCodes(Obd2Profile.deep).value()).value()).value()
+        assertEquals(listOf("P0420"), permanent.map { it.code })
+        fun pid(p: ObdPid) = Obd2.decodePid(protocol.request(Obd2.requestPid(p, Obd2Profile.deep).value()).value()).value().value
+        assertEquals(7.8, pid(ObdPid.SHORT_FUEL_TRIM_B1), 0.05)
+        assertEquals(5.0, pid(ObdPid.MAF_RATE), 0.001)
+        assertEquals(100.0, pid(ObdPid.DISTANCE_SINCE_CLEAR), 0.001)
+    }
+
+    @Test
     fun `parser handles status words`() {
         assertEquals(ElmResponseParser.Result.NoData, ElmResponseParser.parse("NO DATA\r\r>"))
         val busy = ElmResponseParser.parse("BUS INIT: ...ERROR\r>")

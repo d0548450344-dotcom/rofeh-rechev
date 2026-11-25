@@ -226,6 +226,26 @@ data class DiagnosticSession(
     val clearedCodes: List<String> = emptyList(),
     /** The scan whose codes were cleared. Kept so the user can always see what was there. */
     val clearedFromSessionId: String? = null,
+    /** Deep scan only: the VIN the car reported (mode 09). Null if not asked or not answered. */
+    val vinRead: String? = null,
+    /** Deep scan only: values the engine ECU stored when a code was set (mode 02). */
+    val freezeFrame: FreezeFrame? = null,
+)
+
+/** The snapshot an ECU stores at the moment it sets a trouble code. */
+@Serializable
+data class FreezeFrame(
+    /** The code that caused the snapshot; null if the car did not say. */
+    val code: String?,
+    val values: List<PidValue>,
+)
+
+/** What a deep scan reads on top of a quick scan. Everything is read-only. */
+data class DeepExtras(
+    val vin: String?,
+    val freezeFrame: FreezeFrame?,
+    val permanentCodes: List<Dtc>,
+    val extraPids: List<PidValue>,
 )
 
 /** What clearing codes did. Clearing never repairs anything. */

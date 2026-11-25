@@ -3,6 +3,7 @@ package car.doctor.core.adapter
 import car.doctor.core.model.AdapterKind
 import car.doctor.core.model.ClearOutcome
 import car.doctor.core.model.ConnectResult
+import car.doctor.core.model.DeepExtras
 import car.doctor.core.model.Dtc
 import car.doctor.core.model.EcuReport
 import car.doctor.core.model.IgnitionState
@@ -43,6 +44,12 @@ interface ObdAdapter {
      */
     fun clearCodes(confirmedAt: String): ClearOutcome =
         ClearOutcome.Refused("המתאם הזה לא תומך במחיקת קודים.")
+
+    /**
+     * Deep scan extras: VIN (mode 09), freeze frame (mode 02), permanent codes (mode 0A) and
+     * more live sensors. Null when the adapter cannot read them.
+     */
+    fun readDeepExtras(readAt: String): DeepExtras? = null
 
     /** Close the link underneath. This is not a code clear and not a diagnosis. */
     fun release()

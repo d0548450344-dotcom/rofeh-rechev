@@ -261,8 +261,16 @@ class Elm327Protocol(
             ObdMode.PENDING_CODES.service,
             ObdMode.PERMANENT_CODES.service,
             -> ElmResponseParser.codePairs(mine, positive)
+            ObdMode.VEHICLE_INFO.service -> {
+                // Mode 09 (VIN and friends): K-line sends one line per 4 bytes. Keep the
+                // requested PID once, then every line's data from the first ECU's answers.
+                val wanted = request.payload.firstOrNull()
+                val lines = mine.filter { wanted == null || (it.size > 1 && it[1] == wanted) }
+                if (lines.isEmpty()) return finishProtocol(ProtocolError.UnexpectedResponse("pid"))
+                listOfNotNull(wanted) + lines.flatMap { it.drop(2) }
+            }
             else -> {
-                // Mode 01 / 02 / 09: the first ECU that echoes the requested PID wins.
+                // Mode 01 / 02: the first ECU that echoes the requested PID wins.
                 val wanted = request.payload.firstOrNull()
                 val match = mine.firstOrNull { wanted == null || (it.size > 1 && it[1] == wanted) }
                     ?: return finishProtocol(ProtocolError.UnexpectedResponse("pid"))

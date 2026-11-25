@@ -40,6 +40,8 @@ object ObdFixtures {
 
     fun pending(codes: List<String>): ByteArray = codesFrame(0x07, codes)
 
+    fun permanent(codes: List<String>): ByteArray = codesFrame(0x0A, codes)
+
     fun negative(service: Int, code: Int = 0x12): ByteArray =
         frame(0x7F, listOf(service and 0xFF, code and 0xFF))
 
