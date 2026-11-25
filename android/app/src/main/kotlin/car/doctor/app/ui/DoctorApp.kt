@@ -1,5 +1,6 @@
 package car.doctor.app.ui
 
+import androidx.compose.runtime.remember
 import car.doctor.core.care.TrendDirection
 import car.doctor.core.care.TrendReport
 import androidx.compose.foundation.background
@@ -485,6 +486,7 @@ private fun SettingsPage(ui: DoctorUi, vm: DoctorViewModel) {
             )
         }
     }
+    WireLogPanel(vm)
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("שמירה")
@@ -923,6 +925,35 @@ private fun TrendsPanel(report: TrendReport) {
                         color = if (trend.warningHe != null) Tone.Amber else Tone.Paper,
                     )
                     Note(trend.warningHe ?: "${trend.readings} קריאות. אין שינוי שמצריך בדיקה.")
+                }
+            }
+        }
+    }
+}
+
+/** Lets the user send the adapter traffic (for example to whoever is helping debug a real car). */
+@Composable
+private fun WireLogPanel(vm: DoctorViewModel) {
+    val context = LocalContext.current
+    val version = appVersion()
+    var emptyNote by remember { mutableStateOf(false) }
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("יומן תקשורת")
+            Note("מה נשלח למתאם ומה הרכב ענה, ב-600 השורות האחרונות. נשמר רק בזיכרון עד סגירת האפליקציה. כולל את ה-VIN אם נקרא.")
+            if (emptyNote) Note("אין עדיין יומן. מתחברים למתאם אמיתי ומריצים סריקה, ואז משתפים.")
+            QuietAction("שתף יומן תקשורת…", enabled = true, selected = false) {
+                val text = vm.wireLogText(version)
+                if (text == null) {
+                    emptyNote = true
+                } else {
+                    emptyNote = false
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, "רופא רכב · יומן תקשורת")
+                        putExtra(android.content.Intent.EXTRA_TEXT, text)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, "שיתוף יומן"))
                 }
             }
         }

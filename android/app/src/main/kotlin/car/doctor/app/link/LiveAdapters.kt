@@ -39,6 +39,9 @@ class SwitchingAdapterFactory(
 
     override fun open(vehicle: Vehicle): ObdAdapter = (live ?: simulated).open(vehicle)
 
+    /** What was sent to and received from the real adapter since it was chosen. Empty for the simulator. */
+    fun wireLog(): List<String> = (live as? Elm327AdapterFactory)?.protocol?.wireLog.orEmpty()
+
     private fun wifiTransport(source: AdapterSource.Wifi): ObdTransport =
         WifiTransport(source.host, source.port, wifiSocketFactory())
 

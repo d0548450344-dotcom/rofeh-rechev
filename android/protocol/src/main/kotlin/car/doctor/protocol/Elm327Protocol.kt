@@ -303,8 +303,36 @@ class Elm327Protocol(
         return null
     }
 
+    private val wire = ArrayDeque<String>()
+    private var wireStartMs: Long? = null
+
+    /**
+     * The last [WIRE_LOG_LINES] lines sent to and received from the adapter, oldest first.
+     * For the user to share when a real car behaves unexpectedly. Contains the VIN if one was read.
+     */
+    val wireLog: List<String> get() = synchronized(wire) { wire.toList() }
+
+    private fun note(line: String) {
+        synchronized(wire) {
+            val now = clock.nowMs()
+            val start = wireStartMs ?: now.also { wireStartMs = it }
+            wire.addLast("+${now - start}ms $line")
+            while (wire.size > WIRE_LOG_LINES) wire.removeFirst()
+        }
+    }
+
     /** Sends one command line and collects text up to the '>' prompt. */
     private fun exchange(command: String, timeoutMs: Long): Exchange {
+        note("→ $command")
+        val result = exchangeRaw(command, timeoutMs)
+        when (result) {
+            is Exchange.Text -> note("← " + result.text.replace(">", "").trim().replace(Regex("[\\r\\n]+"), " | "))
+            is Exchange.Failed -> note("✕ ${result.failure}")
+        }
+        return result
+    }
+
+    private fun exchangeRaw(command: String, timeoutMs: Long): Exchange {
         require(command.isNotEmpty()) { "an empty line makes the ELM327 repeat its last command" }
         val sent = transport.send("$command\r".toByteArray(Charsets.US_ASCII))
         if (sent is TransportOutcome.Failed) return Exchange.Failed(ProtocolFailure.FromTransport(sent.error))
@@ -406,6 +434,8 @@ class Elm327Protocol(
         init {
             check(READ_ONLY_SERVICES.none { it in WRITE_AND_FLASH_SERVICES || it == 0x04 })
         }
+
+        const val WIRE_LOG_LINES = 600
 
         private fun hex(value: Int): String = "%02X".format(value and 0xFF)
     }

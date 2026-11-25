@@ -330,6 +330,22 @@ class DoctorViewModel(
         }
     }
 
+    /** Plain-text communication log for sharing, or null when there is nothing to share. */
+    fun wireLogText(version: String): String? {
+        val lines = links.wireLog()
+        if (lines.isEmpty()) return null
+        return buildString {
+            appendLine("רופא רכב · יומן תקשורת עם המתאם")
+            appendLine("גרסה: $version")
+            appendLine("מתאם: ${links.source.labelHe}")
+            appendLine("רכב: ${ui.metaHe}")
+            appendLine("שורות: ${lines.size} (אחרונות)")
+            appendLine("→ נשלח למתאם · ← התקבל · ✕ כשל")
+            appendLine()
+            lines.forEach { appendLine(it) }
+        }
+    }
+
     // ---- Reminders and service plan ----
 
     var careOpen by mutableStateOf(false)

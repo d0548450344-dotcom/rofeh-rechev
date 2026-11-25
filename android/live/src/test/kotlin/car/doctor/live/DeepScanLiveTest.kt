@@ -1,6 +1,7 @@
 package car.doctor.live
 
 import car.doctor.core.model.AdapterKind
+import car.doctor.protocol.Elm327Protocol
 import car.doctor.core.model.ClearConfirmation
 import car.doctor.core.model.DtcStatus
 import car.doctor.core.model.Fuel
@@ -91,5 +92,20 @@ class DeepScanLiveTest {
         bench.deepScan()
         assertNotNull(bench.sessions().first().vinNoteHe)
         assertTrue(bench.sessions().first().vinNoteHe!!.contains("שונה"))
+    }
+
+    @Test
+    fun `the communication log records what was sent and answered`() {
+        val car = FakeCar(DEEP_CAR)
+        val factory = Elm327AdapterFactory(AdapterKind.CLASSIC, car)
+        val bench = VehicleBench(SnapshotGarageRepository(), factory)
+        bench.addVehicle(NewVehicle("טסט", "טויוטה", "קורולה", 2016, Fuel.GASOLINE, ""))
+        bench.connect()
+        bench.quickScan()
+        val log = factory.protocol.wireLog
+        assertTrue(log.any { it.contains("→ ATZ") })
+        assertTrue(log.any { it.contains("→ 03") })
+        assertTrue(log.any { it.contains("← 43 01 03 00") })
+        assertTrue(log.size <= Elm327Protocol.WIRE_LOG_LINES)
     }
 }
