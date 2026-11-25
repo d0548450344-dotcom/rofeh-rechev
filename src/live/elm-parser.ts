@@ -41,7 +41,8 @@ const HEX_ONLY = /^[0-9A-F]+$/;
 export function elmLines(raw: string, sentCommand?: string): string[] {
   const echo = sentCommand?.replace(/ /g, "").toUpperCase();
   return raw
-    .replace(/\u0000/g, "")
+    .split(String.fromCharCode(0))
+    .join("")
     .replace(/>/g, "")
     .split(/[\r\n]/)
     .map((line) => line.trim().toUpperCase())

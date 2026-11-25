@@ -21,7 +21,6 @@ import type {
   ConnectResult,
   EcuId,
   FaultId,
-  Fuel,
   IgnitionState,
   Posture,
   ScanSession,

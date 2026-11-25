@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { describeDtc, installDtcOverlay, isKnownDtc, knownDtcCount, parseDtcSource } from "./catalog.ts";
 import { DTC_DB } from "./dtc-db.generated.ts";
-// @ts-expect-error plain .mjs build script without type declarations
 import { KT_OUT, TS_OUT, loadCodes, renderKotlin, renderTs } from "../../scripts/gen-dtc.mjs";
 
 test("generated tables match shared/dtc/generic-dtc-he.json", () => {
