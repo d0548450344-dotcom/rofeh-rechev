@@ -1,5 +1,10 @@
 package car.doctor.core.session
 
+import car.doctor.core.care.CarePlan
+import car.doctor.core.care.Reminder
+import car.doctor.core.care.Reminders
+import car.doctor.core.care.TrendReport
+import car.doctor.core.care.Trends
 import car.doctor.core.model.DtcStatus
 import car.doctor.core.adapter.ObdAdapterFactory
 import car.doctor.core.catalog.ignitionLabel
@@ -101,6 +106,31 @@ class VehicleBench(
     fun vehicles(): List<Vehicle> = repository.vehicles()
 
     /** Garage visits of the selected vehicle, newest first. */
+    fun carePlan(): CarePlan? = selected()?.care
+
+    /** Validates and stores the reminder settings of the selected vehicle. */
+    fun setCarePlan(plan: CarePlan): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        val date = plan.lastServiceDate?.trim()?.takeIf { it.isNotEmpty() }
+        if (date != null && runCatching { java.time.LocalDate.parse(date) }.isFailure) {
+            return rejected("תאריך הטיפול צריך להיות בפורמט 2026-03-15.")
+        }
+        if (plan.checkEveryDays !in 0..90) return rejected("תדירות סריקה: בין 0 (בלי תזכורת) ל-90 ימים.")
+        if (plan.serviceEveryMonths !in 1..36) return rejected("מרווח בין טיפולים: בין 1 ל-36 חודשים.")
+        repository.upsertVehicle(vehicle.copy(care = plan.copy(lastServiceDate = date, serviceNoteHe = plan.serviceNoteHe.trim().take(80))))
+        return accepted()
+    }
+
+    fun reminders(): List<Reminder> {
+        val vehicle = selected() ?: return emptyList()
+        return Reminders.forVehicle(vehicle.care, repository.sessionsFor(vehicle.id), repository.visitsFor(vehicle.id), clock.now())
+    }
+
+    fun trends(): TrendReport? {
+        val vehicle = selected() ?: return null
+        return Trends.forVehicle(repository.sessionsFor(vehicle.id))
+    }
+
     fun visits(): List<GarageVisit> {
         val id = selected()?.id ?: return emptyList()
         return repository.visitsFor(id)

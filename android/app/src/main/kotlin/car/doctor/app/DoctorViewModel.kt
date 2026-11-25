@@ -1,5 +1,8 @@
 package car.doctor.app
 
+import car.doctor.core.care.CarePlan
+import car.doctor.core.care.Reminder
+import car.doctor.core.care.TrendReport
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -90,6 +93,9 @@ data class DoctorUi(
     val canFinishVisit: Boolean = false,
     val openVisit: VisitView? = null,
     val visits: List<VisitView> = emptyList(),
+    val reminders: List<Reminder> = emptyList(),
+    val trends: TrendReport? = null,
+    val care: CarePlan? = null,
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -324,6 +330,45 @@ class DoctorViewModel(
         }
     }
 
+    // ---- Reminders and service plan ----
+
+    var careOpen by mutableStateOf(false)
+        private set
+    var checkEveryText by mutableStateOf("7")
+    var lastServiceText by mutableStateOf("")
+    var serviceMonthsText by mutableStateOf("12")
+    var serviceNote by mutableStateOf("")
+
+    fun openCareForm() {
+        val plan = bench.carePlan() ?: CarePlan()
+        checkEveryText = plan.checkEveryDays.toString()
+        lastServiceText = plan.lastServiceDate.orEmpty()
+        serviceMonthsText = plan.serviceEveryMonths.toString()
+        serviceNote = plan.serviceNoteHe
+        careOpen = true
+    }
+
+    fun cancelCareForm() {
+        careOpen = false
+    }
+
+    fun submitCare() {
+        val every = checkEveryText.trim().toIntOrNull()
+        val months = serviceMonthsText.trim().toIntOrNull()
+        if (every == null || months == null) {
+            noticeHe = "תדירות ומרווח צריכים להיות מספרים."
+            ui = compose()
+            return
+        }
+        val plan = CarePlan(every, lastServiceText.trim().ifEmpty { null }, months, serviceNote)
+        act {
+            val effect = bench.setCarePlan(plan)
+            noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
+            if (effect is BenchEffect.Accepted) main.post { careOpen = false }
+            null
+        }
+    }
+
     // ---- Before / after a garage visit ----
 
     var visitForm by mutableStateOf(VisitForm.NONE)
@@ -547,6 +592,9 @@ class DoctorViewModel(
             canFinishVisit = idle && snap.capabilities.canFinishVisit,
             openVisit = visits.firstOrNull { it.open },
             visits = visits,
+            reminders = bench.reminders(),
+            trends = bench.trends(),
+            care = bench.carePlan(),
         )
     }
 

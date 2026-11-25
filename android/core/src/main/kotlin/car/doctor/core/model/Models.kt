@@ -90,6 +90,7 @@ data class Vehicle(
     val vin: String,
     val createdAt: String,
     val sim: VehicleSim = VehicleSim(),
+    val care: car.doctor.core.care.CarePlan = car.doctor.core.care.CarePlan(),
 )
 
 data class NewVehicle(

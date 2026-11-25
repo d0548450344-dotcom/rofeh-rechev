@@ -1,5 +1,7 @@
 package car.doctor.app.ui
 
+import car.doctor.core.care.TrendDirection
+import car.doctor.core.care.TrendReport
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -200,6 +202,7 @@ private fun HomePage(ui: DoctorUi, vm: DoctorViewModel) {
     if (ui.hasVehicle) {
         VehicleHero(ui)
         PrimaryAction("לספסל הסריקה", enabled = true) { vm.showBench() }
+        CarePanel(ui, vm)
     } else {
         Text(
             "קודי תקלה, מוכנות ונתונים חיים דרך מתאם ELM327 (בלוטות׳ או Wi-Fi), או רכב מדומה לתרגול. מחיקת קודים עם הגנות; אין צריבה.",
@@ -424,6 +427,7 @@ private fun HistoryPage(ui: DoctorUi, vm: DoctorViewModel) {
         "היסטוריה",
         "הסריקות שמורות בקובץ מקומי של הרכב הנבחר. סגירת האפליקציה לא מוחקת אותן.",
     )
+    ui.trends?.let { TrendsPanel(it) }
     if (ui.visits.isNotEmpty()) {
         SectionLabel("ביקורים במוסך")
         ui.visits.forEach { VisitCard(it, vm) }
@@ -841,6 +845,86 @@ private fun VisitCard(visit: VisitView, vm: DoctorViewModel) {
                     }
                 },
             )
+        }
+    }
+}
+
+/** Reminders for the selected car, and the form that sets them. */
+@Composable
+private fun CarePanel(ui: DoctorUi, vm: DoctorViewModel) {
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("תזכורות")
+            if (ui.reminders.isEmpty() && !vm.careOpen) {
+                Note("אין כרגע מה להזכיר.")
+            }
+            ui.reminders.forEach { reminder ->
+                InnerBlock {
+                    Text(
+                        reminder.titleHe,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (reminder.urgent) Tone.Amber else Tone.Paper,
+                    )
+                    Note(reminder.detailHe)
+                }
+            }
+            if (!vm.careOpen) {
+                val plan = ui.care
+                val summary = buildString {
+                    append(if ((plan?.checkEveryDays ?: 0) > 0) "סריקה כל ${plan?.checkEveryDays} ימים" else "בלי תזכורת סריקה")
+                    plan?.nextServiceDate()?.let { append(" · טיפול הבא ב-$it") } ?: append(" · תאריך טיפול לא הוזן")
+                }
+                Note(summary)
+                QuietAction("הגדרת תזכורות וטיפולים…", enabled = ui.hasVehicle, selected = false) { vm.openCareForm() }
+            } else {
+                Note("תזכורות מופיעות כשפותחים את האפליקציה. אין ב-OBD-II מד קילומטראז׳ כללי, לכן הטיפול לפי תאריך.")
+                Field("סריקה תקופתית כל כמה ימים (0 = בלי)", vm.checkEveryText, number = true, ltr = true) { vm.checkEveryText = it }
+                Field("תאריך הטיפול האחרון", vm.lastServiceText, ltr = true, supporting = "בפורמט 2026-03-15") { vm.lastServiceText = it }
+                Field("טיפול כל כמה חודשים", vm.serviceMonthsText, number = true, ltr = true) { vm.serviceMonthsText = it }
+                Field("הערה לטיפול (למשל: 15,000 ק״מ, שמן ופילטרים)", vm.serviceNote) { vm.serviceNote = it }
+                PairRow(
+                    left = { PrimaryAction("שמור", enabled = ui.busyHe == null) { vm.submitCare() } },
+                    right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelCareForm() } },
+                )
+            }
+        }
+    }
+}
+
+/** Long-term view: live values over time and codes that keep coming back. */
+@Composable
+private fun TrendsPanel(report: TrendReport) {
+    if (report.scansUsed == 0) return
+    SectionLabel("מגמות לאורך זמן")
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Note(report.noteHe)
+            report.recurring.forEach { code ->
+                InnerBlock {
+                    Text(
+                        "${code.code} · הופיע ב-${code.sessions} סריקות",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (code.returnedAfterClear) Tone.Amber else Tone.Paper,
+                    )
+                    Note(code.descriptionHe)
+                    if (code.returnedAfterClear) Note("חזר אחרי מחיקה: התקלה עצמה לא תוקנה.")
+                }
+            }
+            report.pids.forEach { trend ->
+                val arrow = when (trend.direction) {
+                    TrendDirection.UP -> "עולה"
+                    TrendDirection.DOWN -> "יורד"
+                    TrendDirection.STEADY -> "יציב"
+                }
+                InnerBlock {
+                    Text(
+                        "${trend.nameHe}: ${trend.first} → ${trend.last} ${trend.unit} · $arrow",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (trend.warningHe != null) Tone.Amber else Tone.Paper,
+                    )
+                    Note(trend.warningHe ?: "${trend.readings} קריאות. אין שינוי שמצריך בדיקה.")
+                }
+            }
         }
     }
 }
