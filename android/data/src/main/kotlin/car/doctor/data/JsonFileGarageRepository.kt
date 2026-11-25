@@ -4,6 +4,7 @@ import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.Vehicle
 import car.doctor.core.persistence.GarageRepository
 import car.doctor.core.persistence.GarageSnapshot
+import car.doctor.core.visit.GarageVisit
 import car.doctor.core.persistence.SnapshotGarageRepository
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -42,6 +43,8 @@ class JsonFileGarageRepository(private val file: File) : GarageRepository {
     override fun vehicle(id: String): Vehicle? = inner.vehicle(id)
     override fun appendSession(session: DiagnosticSession): List<DiagnosticSession> = inner.appendSession(session)
     override fun sessionsFor(vehicleId: String): List<DiagnosticSession> = inner.sessionsFor(vehicleId)
+    override fun upsertVisit(visit: GarageVisit) = inner.upsertVisit(visit)
+    override fun visitsFor(vehicleId: String): List<GarageVisit> = inner.visitsFor(vehicleId)
 
     private fun readOrEmpty(): GarageSnapshot {
         if (!file.isFile) return GarageSnapshot()

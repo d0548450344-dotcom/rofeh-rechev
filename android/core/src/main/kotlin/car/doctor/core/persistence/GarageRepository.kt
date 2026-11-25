@@ -2,15 +2,21 @@ package car.doctor.core.persistence
 
 import car.doctor.core.model.DiagnosticSession
 import car.doctor.core.model.Vehicle
+import car.doctor.core.visit.GarageVisit
 import kotlinx.serialization.Serializable
 
-const val HISTORY_LIMIT = 40
+/**
+ * Scans kept across all vehicles. Large enough for long-term trends (about a year of
+ * weekly scans for several cars). Scans that a garage visit points to are never dropped.
+ */
+const val HISTORY_LIMIT = 300
 
 @Serializable
 data class GarageSnapshot(
     val vehicles: List<Vehicle> = emptyList(),
     val sessions: List<DiagnosticSession> = emptyList(),
     val selectedId: String? = null,
+    val visits: List<GarageVisit> = emptyList(),
 )
 
 /**
@@ -28,6 +34,8 @@ interface GarageRepository {
     fun vehicle(id: String): Vehicle?
     fun appendSession(session: DiagnosticSession): List<DiagnosticSession>
     fun sessionsFor(vehicleId: String): List<DiagnosticSession>
+    fun upsertVisit(visit: GarageVisit)
+    fun visitsFor(vehicleId: String): List<GarageVisit>
 }
 
 /**
@@ -64,6 +72,7 @@ class SnapshotGarageRepository(
         current = current.copy(
             vehicles = current.vehicles.filterNot { it.id == id },
             sessions = current.sessions.filterNot { it.vehicleId == id },
+            visits = current.visits.filterNot { it.vehicleId == id },
             selectedId = selected,
         )
         onWrite(current)
@@ -82,9 +91,30 @@ class SnapshotGarageRepository(
 
     override fun appendSession(session: DiagnosticSession): List<DiagnosticSession> {
         if (current.sessions.any { it.id == session.id }) return sessionsFor(session.vehicleId)
-        current = current.copy(sessions = (listOf(session) + current.sessions).take(HISTORY_LIMIT))
+        current = current.copy(sessions = trimmed(listOf(session) + current.sessions))
         onWrite(current)
         return sessionsFor(session.vehicleId)
+    }
+
+    override fun upsertVisit(visit: GarageVisit) {
+        val visits = current.visits.toMutableList()
+        val index = visits.indexOfFirst { it.id == visit.id }
+        if (index >= 0) visits[index] = visit else visits.add(0, visit)
+        current = current.copy(visits = visits.toList())
+        onWrite(current)
+    }
+
+    override fun visitsFor(vehicleId: String): List<GarageVisit> =
+        current.visits.filter { it.vehicleId == vehicleId }
+
+    /** Newest first, at most [HISTORY_LIMIT], but never a scan a garage visit refers to. */
+    private fun trimmed(sessions: List<DiagnosticSession>): List<DiagnosticSession> {
+        if (sessions.size <= HISTORY_LIMIT) return sessions
+        val pinned = current.visits.flatMap { listOfNotNull(it.beforeSessionId, it.afterSessionId) }.toSet() +
+            sessions.mapNotNull { it.clearedFromSessionId }
+        val keep = sessions.take(HISTORY_LIMIT).toMutableList()
+        keep += sessions.drop(HISTORY_LIMIT).filter { it.id in pinned }
+        return keep
     }
 
     override fun sessionsFor(vehicleId: String): List<DiagnosticSession> =
@@ -93,5 +123,6 @@ class SnapshotGarageRepository(
     private fun copyOf(snapshot: GarageSnapshot): GarageSnapshot = snapshot.copy(
         vehicles = snapshot.vehicles.toList(),
         sessions = snapshot.sessions.toList(),
+        visits = snapshot.visits.toList(),
     )
 }

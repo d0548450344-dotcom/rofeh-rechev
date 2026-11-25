@@ -33,12 +33,17 @@ import car.doctor.core.present.SessionPresenter
 import car.doctor.core.present.SessionView
 import car.doctor.core.session.BenchEffect
 import car.doctor.core.session.VehicleBench
+import car.doctor.core.visit.VisitPresenter
+import car.doctor.core.visit.VisitView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 enum class DoctorScreen { HOME, BENCH, RESULT, HISTORY, SETTINGS }
 
 enum class PickerMode { NONE, BLUETOOTH, WIFI }
+
+/** Garage-visit form: hidden, opening a visit ("before"), closing it ("after"). */
+enum class VisitForm { NONE, START, FINISH }
 
 /** Clear-codes flow: nothing, first warning, second confirmation. */
 enum class ClearStep { NONE, WARN, CONFIRM }
@@ -79,6 +84,12 @@ data class DoctorUi(
     val canChangeSource: Boolean,
     /** A scan on this link just found codes; clearing them is possible. */
     val canClear: Boolean,
+    /** The scan that just finished can be the "before" of a garage visit. */
+    val canStartVisit: Boolean = false,
+    /** The scan that just finished can be the "after" of the open visit. */
+    val canFinishVisit: Boolean = false,
+    val openVisit: VisitView? = null,
+    val visits: List<VisitView> = emptyList(),
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -305,6 +316,50 @@ class DoctorViewModel(
         }
     }
 
+    // ---- Before / after a garage visit ----
+
+    var visitForm by mutableStateOf(VisitForm.NONE)
+        private set
+    var garageName by mutableStateOf("")
+    var plannedWork by mutableStateOf("")
+    var reportedWork by mutableStateOf("")
+
+    fun openVisitForm(form: VisitForm) {
+        visitForm = form
+        if (form == VisitForm.FINISH) reportedWork = ""
+    }
+
+    fun cancelVisitForm() {
+        visitForm = VisitForm.NONE
+    }
+
+    fun submitVisit() {
+        val form = visitForm
+        val name = garageName
+        val plan = plannedWork
+        val reported = reportedWork
+        act(if (form == VisitForm.FINISH) "משווה לסריקה שלפני המוסך…" else null) {
+            val effect = when (form) {
+                VisitForm.START -> bench.startGarageVisit(name, plan)
+                VisitForm.FINISH -> bench.finishGarageVisit(reported)
+                VisitForm.NONE -> return@act null
+            }
+            noticeHe = (effect as? BenchEffect.Rejected)?.messageHe
+            if (effect is BenchEffect.Accepted) {
+                main.post {
+                    visitForm = VisitForm.NONE
+                    if (form == VisitForm.START) {
+                        garageName = ""
+                        plannedWork = ""
+                    }
+                }
+                if (form == VisitForm.FINISH) DoctorScreen.HISTORY else null
+            } else {
+                null
+            }
+        }
+    }
+
     // ---- Adapter picker ----
 
     fun openPicker(mode: PickerMode) {
@@ -437,7 +492,9 @@ class DoctorViewModel(
 
     private fun compose(): DoctorUi {
         val snap = bench.snapshot()
-        val history = bench.sessions().map(SessionPresenter::present)
+        val sessions = bench.sessions()
+        val history = sessions.map(SessionPresenter::present)
+        val visits = bench.visits().map { VisitPresenter.present(it, sessions) }
         if (openId != null && history.none { it.id == openId }) openId = null
         val vehicle = snap.vehicle
         val open = history.firstOrNull { it.id == openId }
@@ -478,6 +535,10 @@ class DoctorViewModel(
             busyHe = busyHe?.takeIf { it.isNotEmpty() },
             canChangeSource = idle,
             canClear = idle && vehicle != null && snap.capabilities.canClear,
+            canStartVisit = idle && snap.capabilities.canStartVisit,
+            canFinishVisit = idle && snap.capabilities.canFinishVisit,
+            openVisit = visits.firstOrNull { it.open },
+            visits = visits,
         )
     }
 

@@ -10,6 +10,7 @@ import car.doctor.core.machine.shouldCommitScan
 import car.doctor.core.model.ClearConfirmation
 import car.doctor.core.model.ClearOutcome
 import car.doctor.core.model.DiagnosticSession
+import car.doctor.core.visit.GarageVisit
 import car.doctor.core.model.FaultId
 import car.doctor.core.model.IgnitionState
 import car.doctor.core.model.NewVehicle
@@ -40,6 +41,10 @@ data class BenchCapabilities(
     val canDisconnect: Boolean,
     /** True right after a scan on this link that found codes. Clearing needs that saved scan. */
     val canClear: Boolean = false,
+    /** A scan on this link just finished and no garage visit is open: it can be the "before" scan. */
+    val canStartVisit: Boolean = false,
+    /** A visit is open and a newer scan on this link just finished: it can be the "after" scan. */
+    val canFinishVisit: Boolean = false,
 )
 
 data class BenchSnapshot(
@@ -93,6 +98,60 @@ class VehicleBench(
     }
 
     fun vehicles(): List<Vehicle> = repository.vehicles()
+
+    /** Garage visits of the selected vehicle, newest first. */
+    fun visits(): List<GarageVisit> {
+        val id = selected()?.id ?: return emptyList()
+        return repository.visitsFor(id)
+    }
+
+    /**
+     * Opens a garage visit with the scan that just finished as the "before" picture.
+     * The owner writes down what the garage plans to do, in their own words.
+     */
+    fun startGarageVisit(garageName: String, plannedWork: String): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        if (openVisit(vehicle.id) != null) return rejected("כבר יש ביקור פתוח במוסך לרכב הזה. סוגרים אותו קודם.")
+        val before = freshScan(vehicle.id) ?: return rejected("סורקים קודם, ואז פותחים ביקור: הסריקה הזו תהיה ה\"לפני\".")
+        val name = garageName.trim()
+        val plan = plannedWork.trim()
+        if (name.isEmpty()) return rejected("חסר שם המוסך או נותן השירות.")
+        if (plan.isEmpty()) return rejected("כותבים מה מתוכנן לעשות ברכב. זה מה שנשווה אליו אחר כך.")
+        repository.upsertVisit(
+            GarageVisit(
+                id = ids.next("visit"),
+                vehicleId = vehicle.id,
+                garageName = name.take(80),
+                plannedWork = plan.take(1_000),
+                openedAt = clock.now(),
+                beforeSessionId = before.id,
+            ),
+        )
+        return accepted()
+    }
+
+    /** Closes the open visit with the scan that just finished as the "after" picture. */
+    fun finishGarageVisit(reportedWork: String): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        val visit = openVisit(vehicle.id) ?: return rejected("אין ביקור פתוח במוסך.")
+        val after = freshScan(vehicle.id) ?: return rejected("סורקים אחרי היציאה מהמוסך, ואז סוגרים את הביקור.")
+        if (after.id == visit.beforeSessionId || after.finishedAt <= visit.openedAt) {
+            return rejected("צריך סריקה חדשה, מאחרי הביקור. הסריקה האחרונה היא עדיין ה\"לפני\".")
+        }
+        repository.upsertVisit(
+            visit.copy(afterSessionId = after.id, closedAt = clock.now(), reportedWork = reportedWork.trim().take(1_000)),
+        )
+        return accepted()
+    }
+
+    private fun openVisit(vehicleId: String): GarageVisit? = repository.visitsFor(vehicleId).firstOrNull { it.isOpen }
+
+    /** The scan made on the current link, if the link is still in the completed state. */
+    private fun freshScan(vehicleId: String): DiagnosticSession? {
+        if (obd.state != ObdSessionState.COMPLETE) return null
+        val id = lastScanThisLink ?: return null
+        return repository.sessionsFor(vehicleId).firstOrNull { it.id == id }
+    }
 
     fun selectVehicle(id: String): BenchEffect {
         if (repository.vehicle(id) == null) return rejected("הרכב לא נמצא.")
@@ -318,7 +377,16 @@ class VehicleBench(
         canScan = obd.canTransition(ObdSessionState.SCANNING),
         canDisconnect = ObdSessionStateMachine.disconnectPath(obd.state)?.isNotEmpty() == true,
         canClear = obd.state == ObdSessionState.COMPLETE && lastScanHadCodes(),
+        canStartVisit = visitCapability().first,
+        canFinishVisit = visitCapability().second,
     )
+
+    private fun visitCapability(): Pair<Boolean, Boolean> {
+        val vehicle = selected() ?: return false to false
+        val scan = freshScan(vehicle.id) ?: return false to false
+        val open = openVisit(vehicle.id) ?: return true to false
+        return false to (scan.id != open.beforeSessionId && scan.finishedAt > open.openedAt)
+    }
 
     private fun lastScanHadCodes(): Boolean {
         val id = lastScanThisLink ?: return false

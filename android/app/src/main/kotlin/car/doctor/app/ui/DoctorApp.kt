@@ -61,6 +61,8 @@ import car.doctor.app.DoctorScreen
 import car.doctor.app.DoctorUi
 import car.doctor.app.DoctorViewModel
 import car.doctor.app.PickerMode
+import car.doctor.app.VisitForm
+import car.doctor.core.visit.VisitView
 import car.doctor.core.catalog.GAP_BADGE_HE
 import car.doctor.core.catalog.fuelLabel
 import car.doctor.core.model.FaultId
@@ -352,6 +354,7 @@ private fun BenchPage(ui: DoctorUi, vm: DoctorViewModel) {
     if (ui.canClear) {
         CautionAction("מחיקת קודי תקלה…", enabled = true) { vm.startClear() }
     }
+    VisitActions(ui, vm)
     ui.latest?.let {
         QuietAction("פתח את התוצאה האחרונה", enabled = true, selected = false) { vm.showResult() }
     }
@@ -420,6 +423,11 @@ private fun HistoryPage(ui: DoctorUi, vm: DoctorViewModel) {
         "היסטוריה",
         "הסריקות שמורות בקובץ מקומי של הרכב הנבחר. סגירת האפליקציה לא מוחקת אותן.",
     )
+    if (ui.visits.isNotEmpty()) {
+        SectionLabel("ביקורים במוסך")
+        ui.visits.forEach { VisitCard(it, vm) }
+        SectionLabel("סריקות")
+    }
     if (ui.history.isEmpty()) {
         Panel {
             Text(
@@ -734,4 +742,99 @@ private fun appVersion(): String {
         }
         "${info.versionName} ($code)"
     }.getOrDefault("לא ידוע")
+}
+
+/**
+ * Before / after a garage visit. Right after a scan the owner can save it as the "before"
+ * picture with the garage's plan; after the visit, a new scan closes it and the app
+ * compares the two. The comparison itself is computed in core, not here.
+ */
+@Composable
+private fun VisitActions(ui: DoctorUi, vm: DoctorViewModel) {
+    ui.openVisit?.let { open ->
+        if (!ui.canFinishVisit && vm.visitForm == VisitForm.NONE) {
+            Panel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SectionLabel("ביקור פתוח במוסך")
+                    Text(open.titleHe, style = MaterialTheme.typography.titleSmall, color = Tone.Paper)
+                    Note("אחרי היציאה מהמוסך: מתחברים, מריצים סריקה מהירה, וסוגרים את הביקור כדי להשוות.")
+                }
+            }
+        }
+    }
+    when (vm.visitForm) {
+        VisitForm.NONE -> {
+            if (ui.canStartVisit) {
+                QuietAction("לפני מוסך: שמור את הסריקה הזו כ״לפני״…", enabled = true, selected = false) {
+                    vm.openVisitForm(VisitForm.START)
+                }
+            }
+            if (ui.canFinishVisit) {
+                PrimaryAction("אחרי מוסך: סגור ביקור והשווה", enabled = true) { vm.openVisitForm(VisitForm.FINISH) }
+            }
+        }
+        VisitForm.START -> Panel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionLabel("לפני הכניסה למוסך")
+                Note("הסריקה שבוצעה עכשיו תישמר כנקודת ההשוואה. כותבים מה המוסך אמר שיעשה, במילים שלכם.")
+                Field("שם המוסך או נותן השירות", vm.garageName) { vm.garageName = it }
+                Field("מה מתוכנן לעשות ברכב", vm.plannedWork) { vm.plannedWork = it }
+                PairRow(
+                    left = { PrimaryAction("פתח ביקור", enabled = ui.busyHe == null) { vm.submitVisit() } },
+                    right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelVisitForm() } },
+                )
+            }
+        }
+        VisitForm.FINISH -> Panel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionLabel("אחרי היציאה מהמוסך")
+                ui.openVisit?.let { Note("מתוכנן היה: ${it.plannedWorkHe}") }
+                Field("מה המוסך אמר שנעשה (לא חובה)", vm.reportedWork) { vm.reportedWork = it }
+                PairRow(
+                    left = { PrimaryAction("סגור והשווה", enabled = ui.busyHe == null) { vm.submitVisit() } },
+                    right = { QuietAction("ביטול", enabled = true, selected = false) { vm.cancelVisitForm() } },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisitCard(visit: VisitView, vm: DoctorViewModel) {
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(visit.titleHe, style = MaterialTheme.typography.titleSmall, color = Tone.Paper)
+            if (visit.warning) Banner(visit.statusHe) else Note(visit.statusHe)
+            StateLine("מתוכנן", visit.plannedWorkHe)
+            visit.reportedWorkHe?.let { StateLine("לפי המוסך נעשה", it) }
+            visit.summaryHe.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = Tone.Soft) }
+            if (visit.newCodes.isNotEmpty()) {
+                FieldCaption("קודים חדשים אחרי המוסך")
+                visit.newCodes.forEach { change ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CodeChip(change.code)
+                        Text(change.descriptionHe, style = MaterialTheme.typography.bodySmall, color = Tone.Soft)
+                    }
+                }
+            }
+            if (visit.goneCodes.isNotEmpty()) {
+                FieldCaption("קודים שלא מופיעים יותר")
+                visit.goneCodes.forEach { change ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CodeChip(change.code)
+                        Text(change.descriptionHe, style = MaterialTheme.typography.bodySmall, color = Tone.Muted)
+                    }
+                }
+            }
+            visit.voltageHe?.let { Note(it) }
+            PairRow(
+                left = { QuietAction("סריקת לפני", enabled = true, selected = false) { vm.openSession(visit.beforeSessionId) } },
+                right = {
+                    QuietAction("סריקת אחרי", enabled = visit.afterSessionId != null, selected = false) {
+                        visit.afterSessionId?.let(vm::openSession)
+                    }
+                },
+            )
+        }
+    }
 }

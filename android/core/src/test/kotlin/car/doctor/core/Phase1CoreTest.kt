@@ -328,9 +328,9 @@ class HistoryRepositoryTest {
         repo.appendSession(sampleSession("a"))
         repo.appendSession(sampleSession("b"))
         assertEquals(listOf("b", "a"), repo.sessionsFor("v1").map { it.id })
-        repeat(50) { index -> repo.appendSession(sampleSession("n$index")) }
+        repeat(HISTORY_LIMIT + 10) { index -> repo.appendSession(sampleSession("n$index")) }
         assertEquals(HISTORY_LIMIT, repo.sessionsFor("v1").size)
-        assertEquals("n49", repo.sessionsFor("v1").first().id)
+        assertEquals("n${HISTORY_LIMIT + 9}", repo.sessionsFor("v1").first().id)
         val other = sampleSession("other", vehicleId = "v2")
         repo.appendSession(other)
         assertTrue(repo.sessionsFor("v1").none { it.id == "other" })
