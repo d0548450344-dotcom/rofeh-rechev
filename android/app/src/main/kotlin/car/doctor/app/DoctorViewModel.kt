@@ -1,6 +1,7 @@
 package car.doctor.app
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.SaleReportCheck
 import car.doctor.core.care.ServiceDraft
 import car.doctor.core.care.ServiceRecord
 import car.doctor.core.care.IntervalUnit
@@ -106,6 +107,8 @@ data class DoctorUi(
     val services: List<ServiceRecord> = emptyList(),
     /** Make of the selected car, for "service center for <make>" searches. */
     val make: String = "",
+    /** Whether a sale report can be issued now, and if not, why. */
+    val saleCheck: SaleReportCheck? = null,
 )
 
 /** Asks the activity for runtime permissions and reports whether all were granted. */
@@ -373,6 +376,18 @@ class DoctorViewModel(
 
     /** A service the user asked to delete; deleting needs a second tap. */
     var confirmDeleteService by mutableStateOf<String?>(null)
+
+    fun attachReceipt(serviceId: String, fileName: String?) {
+        act {
+            noticeHe = (bench.attachReceipt(serviceId, fileName) as? BenchEffect.Rejected)?.messageHe
+            null
+        }
+    }
+
+    fun receiptFailed() {
+        noticeHe = "לא הצלחתי לקרוא את התמונה. בוחרים צילום אחר."
+        ui = compose()
+    }
 
     fun removeService(id: String) {
         if (confirmDeleteService != id) {
@@ -691,6 +706,7 @@ class DoctorViewModel(
             currentReading = bench.currentReading(),
             services = bench.services(),
             make = vehicle?.make.orEmpty(),
+            saleCheck = if (vehicle != null) bench.saleReport() else null,
         )
     }
 

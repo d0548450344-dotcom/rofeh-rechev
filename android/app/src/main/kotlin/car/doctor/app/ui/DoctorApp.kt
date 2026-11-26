@@ -1,5 +1,15 @@
 package car.doctor.app.ui
 
+import car.doctor.app.report.SaleReportPdf
+import car.doctor.app.report.Receipts
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import androidx.core.content.FileProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
 import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.IntervalUnit
 import androidx.compose.foundation.border
@@ -438,6 +448,7 @@ private fun HistoryPage(ui: DoctorUi, vm: DoctorViewModel) {
         "היסטוריה",
         "הסריקות שמורות בקובץ מקומי של הרכב הנבחר. סגירת האפליקציה לא מוחקת אותן.",
     )
+    if (ui.hasVehicle) SaleReportPanel(ui)
     if (ui.services.isNotEmpty()) ServiceHistory(ui, vm)
     ui.trends?.let { TrendsPanel(it) }
     if (ui.visits.isNotEmpty()) {
@@ -1104,6 +1115,7 @@ private fun ServiceHistory(ui: DoctorUi, vm: DoctorViewModel) {
                             },
                         )
                     }
+                    ReceiptButton(record.id, hasReceipt = record.receiptFile != null, enabled = ui.busyHe == null, vm = vm)
                     val confirming = vm.confirmDeleteService == record.id
                     TextButton(onClick = { vm.removeService(record.id) }, enabled = ui.busyHe == null) {
                         Text(
@@ -1165,6 +1177,77 @@ private fun openMapSearch(context: android.content.Context, query: String) {
             context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, web))
         } catch (_: android.content.ActivityNotFoundException) {
             // No map app and no browser: nothing to open.
+        }
+    }
+}
+
+/** Picks a photo of the garage receipt and stores a private, shrunk copy. */
+@Composable
+private fun ReceiptButton(serviceId: String, hasReceipt: Boolean, enabled: Boolean, vm: DoctorViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val name = withContext(Dispatchers.IO) {
+                    runCatching { Receipts.importPhoto(context, uri, serviceId) }.getOrNull()
+                }
+                if (name != null) vm.attachReceipt(serviceId, name) else vm.receiptFailed()
+            }
+        }
+    }
+    TextButton(
+        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        enabled = enabled,
+    ) {
+        Text(
+            if (hasReceipt) "✓ קבלה צורפה · החלפה" else "צירוף צילום קבלה מהמוסך",
+            color = if (hasReceipt) Tone.AccentText else Tone.Soft,
+        )
+    }
+}
+
+/**
+ * Sale report: issued only when the car is clean, all readiness monitors are complete and every
+ * past fault has a receipt. Otherwise lists what is still missing.
+ */
+@Composable
+private fun SaleReportPanel(ui: DoctorUi) {
+    val check = ui.saleCheck ?: return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val version = appVersion()
+    var working by remember { mutableStateOf(false) }
+    SectionLabel("דו״ח רכב למכירה")
+    Panel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Note("לקונה של הרכב. מופק רק אחרי שהתקלות תוקנו, אין קודים, כל בדיקות המוכנות הושלמו, ולכל תקלה שהייתה יש צילום קבלה מהמוסך.")
+            val report = check.report
+            if (report == null) {
+                Text("עוד אי אפשר להפיק:", style = MaterialTheme.typography.titleSmall, color = Tone.Amber)
+                check.blockersHe.forEach { Note("• $it") }
+            } else {
+                Text("אפשר להפיק דו״ח.", style = MaterialTheme.typography.titleSmall, color = Tone.AccentText)
+                PrimaryAction(if (working) "מכין PDF…" else "הפק ושתף דו״ח", enabled = !working && ui.busyHe == null) {
+                    working = true
+                    scope.launch {
+                        val file = withContext(Dispatchers.IO) {
+                            runCatching { SaleReportPdf.write(context, report, version) }.getOrNull()
+                        }
+                        working = false
+                        if (file != null) {
+                            val uri = FileProvider.getUriForFile(context, context.packageName + ".reports", file)
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "application/pdf"
+                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "דו״ח רכב · ${report.vehicleHe}")
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(send, "שיתוף הדו״ח"))
+                        }
+                    }
+                }
+            }
         }
     }
 }

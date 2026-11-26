@@ -1,6 +1,8 @@
 package car.doctor.core.session
 
 import car.doctor.core.care.CarePlan
+import car.doctor.core.care.SaleReportCheck
+import car.doctor.core.care.SaleReports
 import car.doctor.core.care.ServiceDraft
 import car.doctor.core.care.ServiceKind
 import car.doctor.core.care.ServiceRecord
@@ -113,6 +115,25 @@ class VehicleBench(
     fun carePlan(): CarePlan? = selected()?.care
 
     /** Validates and stores the reminder settings of the selected vehicle. */
+    /** Attaches (or replaces) the receipt photo of a service. [fileName] is in the app's receipts folder. */
+    fun attachReceipt(serviceId: String, fileName: String?): BenchEffect {
+        val vehicle = selected() ?: return rejected("אין רכב נבחר.")
+        val record = repository.servicesFor(vehicle.id).firstOrNull { it.id == serviceId } ?: return rejected("הטיפול לא נמצא.")
+        repository.upsertService(record.copy(receiptFile = fileName))
+        return accepted()
+    }
+
+    fun saleReport(): SaleReportCheck {
+        val vehicle = selected() ?: return SaleReportCheck(null, listOf("אין רכב נבחר."))
+        return SaleReports.check(
+            vehicle,
+            repository.sessionsFor(vehicle.id),
+            repository.servicesFor(vehicle.id),
+            repository.visitsFor(vehicle.id),
+            clock.now(),
+        )
+    }
+
     fun services(): List<ServiceRecord> {
         val id = selected()?.id ?: return emptyList()
         return repository.servicesFor(id)
@@ -179,6 +200,7 @@ class VehicleBench(
                     garageName = garageName.trim().take(60).ifEmpty { same?.garageName.orEmpty() },
                     noteHe = saved.serviceNoteHe,
                     visitId = visitId ?: same?.visitId,
+                    receiptFile = same?.receiptFile,
                 ),
             )
             // An older service goes into the history; reminders still count from the newest one.

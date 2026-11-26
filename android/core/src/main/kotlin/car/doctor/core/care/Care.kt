@@ -73,6 +73,8 @@ data class ServiceRecord(
     val noteHe: String = "",
     /** The before/after garage visit this service came from, if any. */
     val visitId: String? = null,
+    /** Photo of the garage receipt, a file name in the app's private receipts folder. */
+    val receiptFile: String? = null,
 )
 
 /** What the owner fills in when a finished garage visit should also be saved as a service. */
