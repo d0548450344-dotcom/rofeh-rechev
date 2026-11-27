@@ -156,7 +156,8 @@ class Elm327ObdAdapter(
                 is Step.Value -> if (read.value.quality == PidQuality.VALID) extras += read.value
             }
         }
-        return DeepExtras(vin = vin, freezeFrame = freeze.frame, permanentCodes = permanent, extraPids = extras)
+        val modules = readModules(protocol, vehicle.make) ?: return null
+        return DeepExtras(vin = vin, freezeFrame = freeze.frame, permanentCodes = permanent, extraPids = extras, modules = modules)
     }
 
     private class FreezeRead(val frame: FreezeFrame?)

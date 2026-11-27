@@ -25,6 +25,8 @@ data class SaleReport(
     val basisDate: String,
     val odometerHe: String?,
     val readinessHe: List<String>,
+    /** ABS / airbags: read and clean, or not read. */
+    val modulesHe: List<String> = emptyList(),
     val codes: List<CodeHistory>,
     val services: List<ServiceRecord>,
     val visitsHe: List<String>,
@@ -69,6 +71,9 @@ object SaleReports {
         if (basis.dtcs.isNotEmpty()) {
             blockers += "ברכב עדיין יש קודים: ${basis.dtcs.map { it.code }.distinct().joinToString(", ")}. מתקנים, ואז סורקים שוב."
         }
+        basis.modules.filter { it.faults.isNotEmpty() }.forEach { m ->
+            blockers += "ב${m.kind.labelHe} יש קודים: ${m.faults.joinToString(", ") { it.label }}. מתקנים במוסך, ואז בדיקה מעמיקה שוב."
+        }
         val supported = basis.readiness.filter { it.status != MonitorStatus.UNSUPPORTED }
         val notReady = supported.filter { it.status == MonitorStatus.INCOMPLETE }
         when {
@@ -97,8 +102,15 @@ object SaleReports {
             visitsHe = visits.filter { !it.isOpen }.mapNotNull { v -> visitLine(v, sessions) },
             realScans = real.size,
             generatedAt = now,
+            modulesHe = basis.modules.map { m ->
+                "${m.kind.labelHe}: " + if (m.reached) "נקרא, אין קודי תקלה" else "לא נקרא"
+            },
             disclaimersHe = listOf(
-                "הדו״ח מבוסס על נתוני OBD-II כלליים של המנוע והפליטה. ABS, כריות אוויר ומערכות מרכב לא נבדקו.",
+                if (basis.modules.any { it.reached }) {
+                    "המנוע והפליטה נבדקו בנתוני OBD-II כלליים; ABS וכריות אוויר נקראו רק במה שמפורט למעלה. מערכות מרכב לא נבדקו."
+                } else {
+                    "הדו״ח מבוסס על נתוני OBD-II כלליים של המנוע והפליטה. ABS, כריות אוויר ומערכות מרכב לא נבדקו."
+                },
                 "צילומי הקבלות צורפו על ידי הבעלים. האפליקציה לא מאמתת את אמיתותן.",
                 "היסטוריה כוללת רק סריקות שנעשו באפליקציה הזו. מה שקרה לפני כן לא ידוע לה.",
                 "מומלץ לקונה לבצע בדיקה עצמאית לפני הקנייה.",

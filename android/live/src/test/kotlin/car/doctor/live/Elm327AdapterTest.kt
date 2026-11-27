@@ -34,6 +34,9 @@ internal class FakeCar(private val replies: Map<String, String>) : ObdTransport 
     private val line = StringBuilder()
     var failConnect = false
 
+    /** Current ATSH header; a reply keyed "7B0:1902FF" answers only while that header is set. */
+    private var header = "7DF"
+
     override fun connect(): TransportOutcome {
         if (failConnect) return TransportOutcome.Failed(TransportFailure.ConnectionFailed("refused"))
         connected = true
@@ -57,7 +60,8 @@ internal class FakeCar(private val replies: Map<String, String>) : ObdTransport 
             val cmd = line.toString()
             line.clear()
             sent += cmd
-            val body = replies[cmd] ?: when {
+            if (cmd.startsWith("ATSH ")) header = cmd.removePrefix("ATSH ").trim()
+            val body = replies["$header:$cmd"] ?: replies[cmd].takeIf { header == "7DF" || cmd.startsWith("AT") } ?: when {
                 cmd == "ATZ" -> "ELM327 v2.1"
                 cmd.startsWith("AT") -> "OK"
                 else -> "NO DATA"

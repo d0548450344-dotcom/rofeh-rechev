@@ -380,4 +380,66 @@ class Elm327ProtocolTest {
         assertEquals(114_180.4, decodeValue(ObdPid.ODOMETER, listOf(0x00, 0x11, 0x6C, 0x2C)).first, 0.01)
         assertEquals(800.0, decodeValue(ObdPid.ENGINE_RUN_TOTAL, listOf(0x01, 0x00, 0x2B, 0xF2, 0x00)).first, 0.01)
     }
+
+    private val abs = ModuleAddress(0x7B0, 0x7B8)
+
+    @Test
+    fun moduleCodesAreReadAndTheBroadcastAddressIsRestored() {
+        val elm = FakeElm().withCar()
+        // Multi-frame ISO-TP answer, 11 bytes: C0035-1F status 09 (confirmed, failing) and
+        // C1123-40 status 50 (test not completed: not a fault).
+        elm.reply("1902FF", "00B\r0: 59 02 FF 40 35 1F\r1: 09 51 23 40 50")
+        val p = protocolOver(elm)
+        p.connect()
+        val r = p.requestModule(abs, Uds.readDtcs()).value()
+        val codes = Uds.decodeDtcs(r).value()
+        assertEquals(listOf("C0035"), codes.map { it.code })
+        assertEquals(0x1F, codes.single().failureType)
+        assertTrue(codes.single().confirmed)
+        val tail = elm.sent.takeLast(5)
+        assertEquals(listOf("ATSH 7B0", "ATCRA 7B8", "1902FF", "ATSH 7DF", "ATCRA"), tail)
+        assertEquals(ProtocolState.READY, p.state())
+    }
+
+    @Test
+    fun onlyReadServicesReachAModule() {
+        val elm = FakeElm().withCar()
+        val p = protocolOver(elm)
+        p.connect()
+        val before = elm.sent.size
+        assertTrue(p.requestModule(abs, ProtocolRequest(0x14, listOf(0xFF, 0xFF, 0xFF))) is ProtocolOutcome.Failed)
+        assertTrue(p.requestModule(abs, ProtocolRequest(0x19, listOf(0x04, 0, 0, 0))) is ProtocolOutcome.Failed)
+        assertTrue(p.requestModule(abs, ProtocolRequest(0x2E, listOf(0xF1, 0x90))) is ProtocolOutcome.Failed)
+        assertEquals(before, elm.sent.size) // nothing went on the wire
+    }
+
+    @Test
+    fun aHeaderThatCannotBeRestoredFailsTheLink() {
+        val elm = FakeElm().withCar()
+        elm.reply("1902FF", "59 02 FF")
+        val p = protocolOver(elm)
+        p.connect()
+        elm.reply("ATSH 7DF", "?")
+        assertTrue(p.requestModule(abs, Uds.readDtcs()) is ProtocolOutcome.Failed)
+        assertTrue(p.state() != ProtocolState.READY)
+    }
+
+    @Test
+    fun legacyBusesAreNotProbed() {
+        val elm = FakeElm().withCar()
+        elm.reply("ATDPN", "A3")
+        val p = protocolOver(elm)
+        p.connect()
+        val before = elm.sent.size
+        assertTrue(p.requestModule(abs, Uds.readDtcs()) is ProtocolOutcome.Failed)
+        assertEquals(before, elm.sent.size)
+    }
+
+    @Test
+    fun kwpCodesAndNegativeAnswersDecode() {
+        val kwp = ProtocolResponse(0x58, listOf(0x01, 0x51, 0x23, 0x60), ProtocolFrame(0x58, listOf(0x01, 0x51, 0x23, 0x60), emptyList()))
+        assertEquals("C1123", Uds.decodeDtcsKwp(kwp).value().single().code)
+        val neg = ProtocolResponse(0x7F, listOf(0x19, 0x11), ProtocolFrame(0x7F, listOf(0x19, 0x11), emptyList()))
+        assertEquals(0x11, Uds.negativeCode(neg))
+    }
 }

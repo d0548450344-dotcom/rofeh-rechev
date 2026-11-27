@@ -71,6 +71,8 @@ data class SessionView(
     val clearNoteHe: String? = null,
     /** Deep scan: VIN line, comparison with the typed VIN, freeze-frame heading. */
     val deepNotesHe: List<String> = emptyList(),
+    /** ABS / airbag modules, one block per module. Deep scans only. */
+    val modulesHe: List<ModuleBlock> = emptyList(),
     val freezeFrame: List<SampleLine> = emptyList(),
 )
 
@@ -94,6 +96,7 @@ object SessionPresenter {
         return buildView(session, headline, checked, failed).copy(
             clearNoteHe = clearNote(session),
             deepNotesHe = deepNotes(session),
+            modulesHe = modules(session),
             freezeFrame = session.freezeFrame?.values.orEmpty().map(::sample),
         )
     }
@@ -112,6 +115,37 @@ object SessionPresenter {
             else -> notes += "freeze frame: מצב המנוע ברגע שנרשם ${frame.code ?: "קוד"}. עוזר להבין באילו תנאים התקלה קרתה."
         }
         return notes
+    }
+
+    /** States what each module answered. "Not reached" is never shown as "no faults". */
+    fun modules(session: DiagnosticSession): List<ModuleBlock> {
+        if (session.kind != "deep") return emptyList()
+        if (session.modules.isEmpty()) {
+            return listOf(
+                ModuleBlock(
+                    "ABS וכריות אוויר",
+                    "לא נבדקו: אין כתובות מוכרות ליצרן הזה. נתמכים: טויוטה/לקסוס, יונדאי/קיה, קבוצת פולקסווגן, פורד/מאזדה.",
+                    emptyList(),
+                    warning = false,
+                ),
+            )
+        }
+        return session.modules.map { m ->
+            val status = when {
+                !m.reached -> "לא נקרא. ${m.noteHe ?: ""}".trim()
+                m.faults.isEmpty() -> "נקרא · אין קודי תקלה."
+                else -> "נקרא · ${m.faults.size} קודי תקלה. האפליקציה לא מוחקת קודים במודול הזה."
+            }
+            val lines = m.faults.map { f ->
+                val state = listOfNotNull(
+                    "פעיל עכשיו".takeIf { f.failingNow },
+                    "מאושר".takeIf { f.confirmed },
+                    "ממתין".takeIf { f.pending },
+                ).joinToString(" · ")
+                "${f.label} · ${f.descriptionHe}${if (state.isNotEmpty()) " · $state" else ""}"
+            }
+            ModuleBlock("${m.kind.labelHe} (${m.addressHe})", status, lines, warning = m.faults.isNotEmpty())
+        }
     }
 
     private fun sample(pid: car.doctor.core.model.PidValue): SampleLine {
@@ -228,3 +262,5 @@ private fun formatSample(value: Double): String {
         String.format(Locale.US, "%.1f", rounded)
     }
 }
+/** One module in the result screen. */
+data class ModuleBlock(val titleHe: String, val statusHe: String, val faultsHe: List<String>, val warning: Boolean)

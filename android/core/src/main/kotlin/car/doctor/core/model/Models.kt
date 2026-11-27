@@ -231,6 +231,8 @@ data class DiagnosticSession(
     val vinRead: String? = null,
     /** Deep scan only: values the engine ECU stored when a code was set (mode 02). */
     val freezeFrame: FreezeFrame? = null,
+    /** ABS / airbag modules, from a deep scan. Empty when not read. */
+    val modules: List<ModuleReport> = emptyList(),
 )
 
 /** The snapshot an ECU stores at the moment it sets a trouble code. */
@@ -247,6 +249,39 @@ data class DeepExtras(
     val freezeFrame: FreezeFrame?,
     val permanentCodes: List<Dtc>,
     val extraPids: List<PidValue>,
+    /** ABS / airbag modules read over UDS, when the car's make has known addresses. */
+    val modules: List<ModuleReport> = emptyList(),
+)
+
+@Serializable
+enum class ModuleKind(val labelHe: String) {
+    ABS("ABS ובקרת יציבות"),
+    SRS("כריות אוויר"),
+}
+
+/** One fault code from a module outside the engine. */
+@Serializable
+data class ModuleFault(
+    val code: String,
+    /** UDS failure-type byte, shown as a suffix (C0035-1F). Null for KWP modules. */
+    val failureType: Int? = null,
+    val confirmed: Boolean,
+    val pending: Boolean,
+    val failingNow: Boolean,
+    val descriptionHe: String,
+) {
+    val label: String get() = failureType?.let { "%s-%02X".format(code, it) } ?: code
+}
+
+/** What one module answered (or that it did not). Read-only: these codes are never cleared here. */
+@Serializable
+data class ModuleReport(
+    val kind: ModuleKind,
+    /** e.g. "7B0 → 7B8" */
+    val addressHe: String,
+    val reached: Boolean,
+    val faults: List<ModuleFault> = emptyList(),
+    val noteHe: String? = null,
 )
 
 /** What clearing codes did. Clearing never repairs anything. */

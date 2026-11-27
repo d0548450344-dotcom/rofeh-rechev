@@ -573,6 +573,17 @@ private fun SessionBody(session: SessionView) {
         session.deepNotesHe.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
         session.freezeFrame.forEach { SampleBlock(it) }
     }
+    if (session.modulesHe.isNotEmpty()) {
+        ResultSection("ABS וכריות אוויר")
+        Note("קריאה בלבד, ניסיוני: הכתובות של המודולים משתנות בין דגמים. \"לא נקרא\" אינו \"תקין\".")
+        session.modulesHe.forEach { m ->
+            InnerBlock {
+                Text(m.titleHe, style = MaterialTheme.typography.titleSmall, color = if (m.warning) Tone.Amber else Tone.Paper)
+                Note(m.statusHe)
+                m.faultsHe.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = Tone.Paper) }
+            }
+        }
+    }
     ResultSection("קודים")
     session.codesNoteHe?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
     session.codes.forEach { CodeBlock(it) }

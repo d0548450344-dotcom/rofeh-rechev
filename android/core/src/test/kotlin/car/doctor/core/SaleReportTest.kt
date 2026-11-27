@@ -93,4 +93,16 @@ class SaleReportTest {
         val old = SaleReports.check(CAR, listOf(scan("2026-10-01")), emptyList(), emptyList(), NOW)
         assertTrue(old.blockersHe.any { it.contains("14") })
     }
+
+    @Test
+    fun anAbsFaultBlocksTheReport() {
+        val abs = car.doctor.core.model.ModuleReport(
+            car.doctor.core.model.ModuleKind.ABS, "7B0 → 7B8", reached = true,
+            faults = listOf(car.doctor.core.model.ModuleFault("C0035", 0x1F, true, false, true, "חיישן גלגל")),
+        )
+        val r = SaleReports.check(CAR, listOf(scan("2026-11-25").copy(modules = listOf(abs))), emptyList(), emptyList(), NOW)
+        assertTrue(r.blockersHe.any { it.contains("C0035-1F") })
+        val clean = SaleReports.check(CAR, listOf(scan("2026-11-25").copy(modules = listOf(abs.copy(faults = emptyList())))), emptyList(), emptyList(), NOW)
+        assertEquals(listOf("ABS ובקרת יציבות: נקרא, אין קודי תקלה"), clean.report!!.modulesHe)
+    }
 }

@@ -101,6 +101,7 @@ object SaleReportPdf {
         section("מצב נוכחי")
         text("אין קודי תקלה שמורים, ממתינים או קבועים.", body)
         report.readinessHe.forEach { text("• $it", body, 2f) }
+        report.modulesHe.forEach { text("• $it", body, 2f) }
 
         section("היסטוריית תקלות ותיקונים")
         if (report.codes.isEmpty()) text("לא נרשמו קודי תקלה בסריקות שנעשו באפליקציה.", body)

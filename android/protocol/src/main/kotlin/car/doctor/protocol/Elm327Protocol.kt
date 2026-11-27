@@ -194,6 +194,88 @@ class Elm327Protocol(
     override fun events(): List<ProtocolEvent> = seen.toList()
 
     /**
+     * One read-only request to a module outside the engine (ABS, airbags), on 11-bit CAN only.
+     * Points the adapter at [address] (ATSH / ATCRA), sends, and always points it back at the
+     * broadcast address. If the adapter cannot be pointed back, the link is marked failed so
+     * the next action reconnects and resets it, instead of talking to the wrong module.
+     */
+    @Synchronized
+    fun requestModule(address: ModuleAddress, request: ProtocolRequest): ProtocolOutcome<ProtocolResponse> {
+        if (request.service !in Uds.MODULE_READ_SERVICES) {
+            return failProtocol(ProtocolError.Unsupported("module-service-${request.service}"))
+        }
+        if (request.service == 0x19 && request.payload.firstOrNull() !in Uds.READ_DTC_SUBFUNCTIONS) {
+            return failProtocol(ProtocolError.Unsupported("module-subfunction"))
+        }
+        if (identity?.protocolNumber !in CAN_11BIT) return failProtocol(ProtocolError.Unsupported("not-can-11bit"))
+        if (machine.state == ProtocolState.READY && !transport.isConnected()) {
+            machine.transition(ProtocolState.DISCONNECTED)
+        }
+        if (machine.state != ProtocolState.READY) {
+            return failTransport(TransportFailure.Disconnected("not-connected"))
+        }
+        check(machine.transition(ProtocolState.EXCHANGING))
+        seen += ProtocolEvent.RequestStarted(request.service)
+        log.request(request.service)
+
+        val header = "ATSH %03X".format(address.request)
+        when (val r = exchange(header, 2_000)) {
+            is Exchange.Failed -> return finish(r.failure)
+            is Exchange.Text -> if (!r.text.contains("OK")) {
+                restoreHeaders()?.let { return finish(it) }
+                return finishProtocol(ProtocolError.Unsupported("adapter-header"))
+            }
+        }
+        // Receive filter. Old clones lack ATCRA; with physical addressing only that module answers anyway.
+        when (val r = exchange("ATCRA %03X".format(address.response), 2_000)) {
+            is Exchange.Failed -> return finish(r.failure)
+            is Exchange.Text -> Unit
+        }
+        val command = buildString {
+            append(hex(request.service))
+            request.payload.forEach { append(hex(it)) }
+        }
+        val reply = exchange(command, requestTimeoutMs)
+        restoreHeaders()?.let { return finish(it) }
+        val text = when (reply) {
+            is Exchange.Failed -> return finish(reply.failure)
+            is Exchange.Text -> reply.text
+        }
+        val positive = (request.service + POSITIVE_OFFSET) and 0xFF
+        return when (val parsed = ElmResponseParser.parse(text, command)) {
+            ElmResponseParser.Result.NoData -> finishProtocol(ProtocolError.MissingPayload("no-data"))
+            is ElmResponseParser.Result.AdapterError -> when (parsed.kind) {
+                ElmErrorKind.NO_VEHICLE -> finishProtocol(ProtocolError.MissingPayload("no-vehicle"))
+                ElmErrorKind.STOPPED -> finishProtocol(ProtocolError.Timeout("stopped"))
+                ElmErrorKind.UNKNOWN_COMMAND -> finishProtocol(ProtocolError.Unsupported("adapter-rejected"))
+                else -> finishProtocol(ProtocolError.MalformedFrame(parsed.word))
+            }
+            is ElmResponseParser.Result.Messages -> {
+                val mine = parsed.messages.firstOrNull { it.isNotEmpty() && it[0] == positive }
+                val negative = parsed.messages.firstOrNull { it.size >= 2 && it[0] == NEGATIVE && it[1] == request.service && (it.getOrNull(2) ?: 0) != 0x78 }
+                when {
+                    mine != null -> ok(positive, mine.drop(1))
+                    negative != null -> ok(NEGATIVE, negative.drop(1))
+                    else -> finishProtocol(ProtocolError.UnexpectedResponse("service"))
+                }
+            }
+        }
+    }
+
+    /** Back to the broadcast address and no receive filter. Null when done; the failure otherwise. */
+    private fun restoreHeaders(): ProtocolFailure? {
+        for (cmd in listOf("ATSH 7DF", "ATCRA")) {
+            when (val r = exchange(cmd, 2_000)) {
+                is Exchange.Failed -> return r.failure
+                is Exchange.Text -> if (cmd == "ATSH 7DF" && !r.text.contains("OK")) {
+                    return ProtocolFailure.FromTransport(TransportFailure.Disconnected("header-not-restored"))
+                }
+            }
+        }
+        return null
+    }
+
+    /**
      * Mode 04. Clears stored and pending codes, freeze frame and readiness monitors on every
      * emissions ECU that answers. It cannot clear permanent codes and it fixes nothing.
      * Most ECUs refuse it while the engine runs (negative answer 0x22).
@@ -427,6 +509,9 @@ class Elm327Protocol(
         val INIT_COMMANDS: List<String> = listOf("ATZ", "ATE0", "ATL0", "ATS1", "ATH0", "ATAT1", "ATSP0")
         private val REQUIRED_COMMANDS = setOf("ATE0", "ATH0", "ATSP0")
         private val RESET_COMMANDS = setOf("ATZ")
+
+        /** ATDPN numbers for 11-bit CAN (500 and 250 kbit/s), with or without the auto prefix. */
+        private val CAN_11BIT: Set<Char?> = setOf('6', '8')
 
         /** Services [request] will put on the bus. 0x04 (clear) only goes through [clearCodes]. */
         val READ_ONLY_SERVICES: Set<Int> = setOf(0x01, 0x02, 0x03, 0x07, 0x09, 0x0A)

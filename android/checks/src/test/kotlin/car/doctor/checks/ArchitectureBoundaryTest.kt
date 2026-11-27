@@ -86,6 +86,14 @@ class ArchitectureBoundaryTest {
         assertTrue(obd2.contains("val WRITE_AND_FLASH_SERVICES"))
         assertTrue(obd2.contains("consent: ClearCodesConsent?"))
 
+        // ABS / airbag modules: read services only, and the set cannot quietly grow.
+        val uds = protocol.single { it.name == "Uds.kt" }.readText()
+        assertEquals(
+            "0x18, 0x19, 0x21, 0x22",
+            uds.substringAfter("MODULE_READ_SERVICES: Set<Int> = setOf(").substringBefore(")"),
+        )
+        assertEquals("0x01, 0x02", uds.substringAfter("READ_DTC_SUBFUNCTIONS: Set<Int> = setOf(").substringBefore(")"))
+
         // No module builds a request for a write or flash service.
         val all = listOf("core", "transport", "protocol", "simulation", "live", "data", "app").flatMap(::sources)
         val flashRequest = Regex("ProtocolRequest\\(\\s*0x(10|11|14|27|28|2E|2F|31|34|35|36|37|3B|3D|85)\\b", RegexOption.IGNORE_CASE)

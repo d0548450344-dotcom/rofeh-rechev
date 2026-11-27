@@ -1,5 +1,7 @@
 package car.doctor.simulation
 
+import car.doctor.core.model.ModuleKind
+import car.doctor.core.model.ModuleReport
 import car.doctor.core.model.FreezeFrame
 import car.doctor.core.model.DeepExtras
 import car.doctor.core.adapter.AdapterCapability
@@ -137,7 +139,11 @@ class MockObdAdapter(
                 val known = describeDtc(code.code)
                 Dtc(code.code, DtcStatus.PERMANENT, EcuId.ENGINE, known.descriptionHe, known.severity, readAt)
             }
-        return DeepExtras(vin = vin, freezeFrame = readFreezeFrame(readAt), permanentCodes = permanent, extraPids = emptyList())
+        val modules = listOf(
+            ModuleReport(ModuleKind.ABS, "מדמה", reached = true, noteHe = "מודול מדומה."),
+            ModuleReport(ModuleKind.SRS, "מדמה", reached = true, noteHe = "מודול מדומה."),
+        )
+        return DeepExtras(vin = vin, freezeFrame = readFreezeFrame(readAt), permanentCodes = permanent, extraPids = emptyList(), modules = modules)
     }
 
     private fun readFreezeFrame(readAt: String): FreezeFrame? {

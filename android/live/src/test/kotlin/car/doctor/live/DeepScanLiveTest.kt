@@ -1,6 +1,7 @@
 package car.doctor.live
 
 import car.doctor.core.model.AdapterKind
+import car.doctor.core.model.ModuleKind
 import car.doctor.protocol.Elm327Protocol
 import car.doctor.core.model.ClearConfirmation
 import car.doctor.core.model.DtcStatus
@@ -107,5 +108,41 @@ class DeepScanLiveTest {
         assertTrue(log.any { it.contains("→ 03") })
         assertTrue(log.any { it.contains("← 43 01 03 00") })
         assertTrue(log.size <= Elm327Protocol.WIRE_LOG_LINES)
+    }
+
+    @Test
+    fun `deep scan reads ABS and airbag codes for a known make and restores the header`() {
+        val car = FakeCar(
+            DEEP_CAR + mapOf(
+                "ATDPN" to "A6",
+                "7B0:1902FF" to "59 02 FF 40 35 1F 09", // ABS: C0035-1F confirmed
+                // 780 (airbags) does not answer at all
+            ),
+        )
+        val bench = deepBench(car)
+        bench.connect()
+        bench.deepScan()
+        val modules = bench.sessions().first().modules
+        val abs = modules.first { it.kind == ModuleKind.ABS }
+        assertTrue(abs.reached)
+        assertEquals("C0035-1F", abs.faults.single().label)
+        val srs = modules.first { it.kind == ModuleKind.SRS }
+        assertFalse(srs.reached)
+        // every header change is undone, and nothing but reads went to a module
+        val i = car.sent.lastIndexOf("ATSH 780")
+        assertEquals("ATSH 7DF", car.sent.drop(i).first { it.startsWith("ATSH") && it != "ATSH 780" })
+        assertTrue(car.sent.filter { it.matches(Regex("^1[0-9A-F].*")) }.all { it.startsWith("1902") || it.startsWith("1802") })
+        assertFalse(car.sent.any { it.startsWith("14") || it.startsWith("10") || it.startsWith("27") })
+    }
+
+    @Test
+    fun `unknown makes are not probed`() {
+        val car = FakeCar(DEEP_CAR + mapOf("ATDPN" to "A6"))
+        val bench = VehicleBench(SnapshotGarageRepository(), Elm327AdapterFactory(AdapterKind.CLASSIC, car))
+        bench.addVehicle(NewVehicle("טסט", "סובארו", "אימפרזה", 2016, Fuel.GASOLINE, ""))
+        bench.connect()
+        bench.deepScan()
+        assertTrue(bench.sessions().first().modules.isEmpty())
+        assertFalse(car.sent.any { it.startsWith("ATSH") })
     }
 }

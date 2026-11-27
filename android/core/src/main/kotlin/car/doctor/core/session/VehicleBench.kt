@@ -432,6 +432,7 @@ class VehicleBench(
                 vinRead = extras.vin,
                 vinNoteHe = extras.vin?.let { compareVin(vehicle.vin, it) } ?: session.vinNoteHe,
                 freezeFrame = extras.freezeFrame,
+                modules = extras.modules,
             )
         }
     }
